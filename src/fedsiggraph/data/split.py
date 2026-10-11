@@ -68,12 +68,14 @@ def split_benign_development(
         return index
 
     train_end = advance_past_timestamp_group(int(n * train_fraction))
-    val_end = advance_past_timestamp_group(
-        int(n * (train_fraction + val_fraction))
-    )
-
-    if val_end <= train_end:
-        val_end = advance_past_timestamp_group(train_end + 1)
+    if val_fraction == 0:
+        val_end = train_end
+    else:
+        val_end = advance_past_timestamp_group(
+            int(n * (train_fraction + val_fraction))
+        )
+        if val_end <= train_end:
+            val_end = advance_past_timestamp_group(train_end + 1)
 
     # Keep at least one calibration timestamp-group.
     if val_end >= n:
