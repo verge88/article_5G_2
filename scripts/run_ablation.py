@@ -18,6 +18,7 @@ MODEL_CHOICES = (
     "semantic_tgn",
     "temporal_heat",
     "temporal_heat_aux",
+    "temporal_heat_continuation_immediate",
     "temporal_heat_continuation",
 )
 
@@ -102,6 +103,8 @@ def model_command(
         sys.executable,
         "scripts/train_temporal_heat.py",
         *common,
+        "--result-model-name",
+        model,
     ]
     if model == "temporal_heat":
         return [
@@ -119,6 +122,16 @@ def model_command(
             "--continuation-score-weight",
             "0",
         ]
+    if model == "temporal_heat_continuation_immediate":
+        return [
+            *heat,
+            "--continuation-loss-weight",
+            "0.25",
+            "--continuation-score-weight",
+            "1.0",
+            "--continuation-history-mode",
+            "immediate",
+        ]
     if model == "temporal_heat_continuation":
         return [
             *heat,
@@ -126,6 +139,8 @@ def model_command(
             "0.25",
             "--continuation-score-weight",
             "1.0",
+            "--continuation-history-mode",
+            "sequence",
         ]
     raise ValueError(f"unknown model: {model}")
 
