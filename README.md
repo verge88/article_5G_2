@@ -417,3 +417,27 @@ fraction of events that form a cross-protocol transition. A dataset should only
 be used to support the cross-protocol contribution when this coverage is
 non-trivial; temporal proximity alone is never used to invent a session link.
 
+
+
+### Cross-protocol ablation suite
+
+Once correlated signaling exports are available, the complete experiment can be
+run with one command:
+
+```bash
+python scripts/run_cross_protocol_suite.py \
+  --benign-dir /path/to/benign/export \
+  --test-dir /path/to/attack/export \
+  --deployment-id site-a \
+  --test-label 1 \
+  --attack-type pfcp_session_deletion \
+  --workspace experiments/cross-protocol/site-a \
+  --seeds 1 2 3 \
+  --epochs 20
+```
+
+By default the launcher refuses to make a cross-protocol experiment when the
+prepared manifest has zero explicit cross-protocol coverage in train or test.
+`--allow-zero-cross-protocol` exists only for debugging and should not be used
+as evidence for the continuation claim.
+
