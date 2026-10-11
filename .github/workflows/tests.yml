@@ -18,3 +18,4 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: pytest
       - run: python scripts/prepare_signaling_parser.py --help
+      - run: python scripts/export_correlated_pcap.py --help
