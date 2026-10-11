@@ -441,3 +441,48 @@ prepared manifest has zero explicit cross-protocol coverage in train or test.
 `--allow-zero-cross-protocol` exists only for debugging and should not be used
 as evidence for the continuation claim.
 
+
+
+## Continuation contribution metrics
+
+TemporalHEAT results now separate the contribution of the continuation score from
+the base anomaly score. Both variants receive their own benign-only calibration
+threshold. Under `--test-memory safe`, they are evaluated on **independent
+causal memory replays**, because the anomaly decision itself controls whether
+an event is allowed to enter TGN memory.
+
+Each result JSON contains:
+
+```text
+metrics
+scope_metrics.explicit_context
+scope_metrics.cross_protocol
+score_ablation.base
+score_ablation.composite
+```
+
+and the multi-seed `summary.json` additionally reports:
+
+```text
+continuation_gain.overall
+continuation_gain.cross_protocol
+```
+
+where each gain is computed pairwise per seed as:
+
+```text
+composite metric - base metric
+```
+
+before mean/std aggregation. This is the primary statistic for testing whether
+cross-protocol continuation modeling adds detection value beyond the underlying
+TemporalHEAT detector.
+
+## GitHub Actions experiment runner
+
+After the branch is merged, the `granomaly-experiments` workflow can be
+started manually from GitHub Actions. It supports `quick`, `standard`, and
+`robust` seed profiles, selectable NRF/SMF experiments, and all three
+test-memory policies. The workflow uploads the complete experiment workspace,
+including every seed-level JSON and `suite_summary.json`, as an artifact.
+
