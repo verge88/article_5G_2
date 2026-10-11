@@ -97,3 +97,28 @@ def test_cross_protocol_context_falls_back_to_explicit_ue_when_session_is_partia
     assert events[2].session_context is not None
     assert transitions.history_mask.tolist() == [False, True, True]
     assert transitions.cross_protocol_mask.tolist() == [False, True, True]
+
+
+def test_origami_compact_sbi_messages_are_not_misclassified_as_ngap():
+    df = pd.DataFrame(
+        {
+            "time": ["1.0", "1.1", "1.2"],
+            "src": ["amf", "ausf", "udm"],
+            "dst": ["ausf", "udm", "amf"],
+            "message": [
+                "POST-nausf-auth",
+                "GET-nudm-ueau",
+                "200",
+            ],
+            "ue": ["imsi-001"] * 3,
+        }
+    )
+
+    events = SignalingParserAdapter("origami").from_dataframe(df, label=0)
+
+    assert [event.protocol for event in events] == ["SBI", "SBI", "SBI"]
+    assert events[0].relation == "SBI:nausf"
+    assert events[0].procedure == "POST:nausf-auth"
+    assert events[1].relation == "SBI:nudm"
+    assert events[1].procedure == "GET:nudm-ueau"
+    assert events[2].direction == "RESPONSE"
