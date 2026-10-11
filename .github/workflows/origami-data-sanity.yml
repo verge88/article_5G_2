@@ -35,15 +35,22 @@ jobs:
 
       - name: Download pinned ORIGAMI example PCAP
         run: |
-          python scripts/fetch_cross_protocol_sources.py             --output data/raw/cross-protocol             --origami pcap
+          python scripts/fetch_cross_protocol_sources.py \
+            --output data/raw/cross-protocol \
+            --origami pcap
 
-      - name: Parse ORIGAMI with pinned signaling parser
+      - name: Export causally correlated ORIGAMI signaling
         run: |
-          python scripts/parse_attack_pcaps.py             --pcap-dir data/raw/cross-protocol/origami             --output-dir data/parsed/origami             --bootstrap
+          mkdir -p data/parsed/origami
+          python scripts/export_correlated_pcap.py \
+            --pcap data/raw/cross-protocol/origami/example.pcap.gz \
+            --output data/parsed/origami/origami_m_stats.csv
 
       - name: Inspect real signaling coverage
         run: |
-          python scripts/inspect_signaling_source.py             --directory data/parsed/origami             --output data/parsed/origami/inspection.json
+          python scripts/inspect_signaling_source.py \
+            --csv data/parsed/origami/origami_m_stats.csv \
+            --output data/parsed/origami/inspection.json
 
       - uses: actions/upload-artifact@v4
         with:
