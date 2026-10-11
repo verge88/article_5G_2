@@ -1,7 +1,11 @@
 import pandas as pd
 
 from fedsiggraph.data.context import build_context_transition_features
-from fedsiggraph.data.signaling_parser import SignalingParserAdapter
+from fedsiggraph.data.signaling_parser import (
+    SignalingParserAdapter,
+    apply_role_map,
+    infer_role_map,
+)
 from fedsiggraph.data.vocab import SemanticVocabularies
 
 
@@ -144,3 +148,35 @@ def test_open5gs_daemon_hostnames_resolve_to_transferable_nf_roles():
     assert events[0].dst_role == "SMF"
     assert events[1].src_role == "SMF"
     assert events[1].dst_role == "UPF"
+
+
+def test_role_inference_recovers_gnb_amf_smf_upf_from_n2_n4_direction():
+    df = pd.DataFrame(
+        {
+            "time": ["1.0", "1.1", "1.2", "1.3"],
+            "src": ["10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4"],
+            "dst": ["10.0.0.2", "10.0.0.1", "10.0.0.4", "10.0.0.3"],
+            "message": [
+                "UNKNOWN_NGAP, NASType.RegistrationRequest",
+                "UNKNOWN_NGAP, NASType.AuthenticationRequest",
+                "SessionEstablishmentRequest",
+                "SessionEstablishmentResponse",
+            ],
+            "ue": ["imsi-001"] * 4,
+        }
+    )
+    events = SignalingParserAdapter("site-a").from_dataframe(df, label=0)
+
+    mapping = infer_role_map(events)
+    resolved = apply_role_map(events, mapping)
+
+    assert mapping == {
+        "10.0.0.1": "gNB",
+        "10.0.0.2": "AMF",
+        "10.0.0.3": "SMF",
+        "10.0.0.4": "UPF",
+    }
+    assert resolved[0].src_role == "gNB"
+    assert resolved[0].dst_role == "AMF"
+    assert resolved[2].src_role == "SMF"
+    assert resolved[2].dst_role == "UPF"
