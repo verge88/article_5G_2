@@ -24,11 +24,13 @@ def test_endpoint_negative_uses_known_node_of_incompatible_role():
 
     sampler = EndpointNegativeTable(data, seed=7)
     batch = data[0:1]
-    neg_dst, mask = sampler.sample(batch)
+    neg_dst, neg_role, mask = sampler.sample(batch)
 
     assert mask.tolist() == [True]
     assert neg_dst.tolist() == [3]
+    assert neg_role.tolist() == [30]
     assert neg_dst.item() != batch.dst.item()
+    assert neg_role.item() != batch.dst_role_id.item()
 
 
 
