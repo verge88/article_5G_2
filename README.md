@@ -591,3 +591,51 @@ The exact two-sided sign-flip test uses no asymptotic approximation. With only
 alongside the p-value; statistical significance alone is not a detection
 metric.
 
+
+
+## Reproducible cross-protocol data acquisition
+
+The recommended benign source is the 2026 ORIGAMI **5G Signaling Traffic**
+dataset. Its parser CSV format is directly compatible with
+`SignalingParserAdapter` and carries a UE identifier across the signaling
+timeline.
+
+A pinned acquisition manifest can be created with:
+
+```bash
+python scripts/fetch_cross_protocol_sources.py \
+  --output data/raw/cross-protocol \
+  --origami example \
+  --dlteam-fuzz
+```
+
+This downloads:
+
+- ORIGAMI Zenodo record `19605370` example signaling CSV/PCAP;
+- Open5GS fuzzing PCAPs from
+  `DLTeamTUC/5GDatasets@e71267ca84f6f38ab39f830a2c515555bb5f5898`.
+
+Every downloaded file is hashed into `source_manifest.json`; ORIGAMI files
+are additionally checked against the MD5 values published by Zenodo.
+
+The DLTeamTUC PCAPs can then be converted with the exact upstream signaling
+parser revision used by the project:
+
+```bash
+python scripts/parse_attack_pcaps.py \
+  --pcap-dir data/raw/cross-protocol/dlteam \
+  --output-dir data/parsed/dlteam-fuzz \
+  --bootstrap
+```
+
+The parser revision is pinned to
+`lsinfo3/5G-Signaling-Parser@e48427c4ede8bde673324a78979fc20702d2c29b`.
+The runtime environment must provide `tshark`, `pyshark`, and the parser's
+Python dependencies; the script deliberately does not install system packet
+capture dependencies automatically.
+
+ORIGAMI is primarily a benign signaling source. DLTeamTUC fuzzing captures are
+used only as an attack-side source after parsing and label verification; the
+two sources should not be treated as one continuous temporal trace, so test
+memory must be reset between them.
+
