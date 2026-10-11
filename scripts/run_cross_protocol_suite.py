@@ -127,6 +127,7 @@ def main() -> None:
         args.deployment_id,
         "--test-history-mode",
         args.test_history_mode,
+        "--infer-roles",
     ]
     if benign_csv:
         prepare += ["--benign-csv", benign_csv]
