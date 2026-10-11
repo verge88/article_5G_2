@@ -146,6 +146,7 @@ class SemanticRunner:
 
         total_loss = 0.0
         total_events = 0
+        endpoint_negative_events = 0
         procedure_negative_events = 0
 
         for batch in loader:
@@ -180,6 +181,7 @@ class SemanticRunner:
             ]
 
             if endpoint_mask.any():
+                endpoint_negative_events += int(endpoint_mask.sum())
                 endpoint_logits = self.model.score_embeddings(
                     z[assoc[src[endpoint_mask]]],
                     z[assoc[neg_dst[endpoint_mask]]],
@@ -224,8 +226,13 @@ class SemanticRunner:
             total_loss += float(loss.detach().cpu()) * n
             total_events += n
 
-        coverage = procedure_negative_events / max(total_events, 1)
-        return total_loss / max(total_events, 1), coverage
+        endpoint_coverage = endpoint_negative_events / max(total_events, 1)
+        procedure_coverage = procedure_negative_events / max(total_events, 1)
+        return (
+            total_loss / max(total_events, 1),
+            endpoint_coverage,
+            procedure_coverage,
+        )
 
     @torch.no_grad()
     def score_stream(
@@ -327,14 +334,19 @@ def main() -> None:
     )
 
     losses: list[float] = []
-    coverages: list[float] = []
+    endpoint_coverages: list[float] = []
+    procedure_coverages: list[float] = []
     for epoch in range(1, args.epochs + 1):
-        loss, coverage = runner.train_epoch(train, args.batch_size)
+        loss, endpoint_coverage, procedure_coverage = runner.train_epoch(
+            train, args.batch_size
+        )
         losses.append(loss)
-        coverages.append(coverage)
+        endpoint_coverages.append(endpoint_coverage)
+        procedure_coverages.append(procedure_coverage)
         print(
             f"epoch={epoch:03d} loss={loss:.6f} "
-            f"procedure_negative_coverage={coverage:.4f}"
+            f"endpoint_negative_coverage={endpoint_coverage:.4f} "
+            f"procedure_negative_coverage={procedure_coverage:.4f}"
         )
 
     runner.score_stream(val, observe="always")
@@ -382,8 +394,11 @@ def main() -> None:
         "test_memory": args.test_memory,
         "test_history_mode": manifest.get("test_history_mode"),
         "train_loss_final": losses[-1] if losses else None,
+        "endpoint_negative_coverage_final": (
+            endpoint_coverages[-1] if endpoint_coverages else None
+        ),
         "procedure_negative_coverage_final": (
-            coverages[-1] if coverages else None
+            procedure_coverages[-1] if procedure_coverages else None
         ),
         "metrics": evaluate_scores(
             test_labels,
