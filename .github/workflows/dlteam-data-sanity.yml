@@ -1,0 +1,68 @@
+name: dlteam-data-sanity
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "scripts/export_correlated_pcap.py"
+      - "scripts/fetch_cross_protocol_sources.py"
+      - "scripts/inspect_signaling_source.py"
+      - "src/fedsiggraph/data/causal_correlation.py"
+      - "src/fedsiggraph/data/signaling_parser.py"
+      - ".github/workflows/dlteam-data-sanity.yml"
+
+jobs:
+  fuzzing-pcaps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install tshark
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tshark
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" pyshark
+
+      - name: Download pinned DLTeamTUC fuzzing PCAPs
+        run: |
+          python scripts/fetch_cross_protocol_sources.py \
+            --output data/raw/cross-protocol \
+            --origami none \
+            --dlteam-fuzz
+
+      - name: Export causally correlated attack signaling
+        run: |
+          mkdir -p data/parsed/dlteam-fuzz
+          for pcap in data/raw/cross-protocol/dlteam/*.pcapng; do
+            stem="$(basename "$pcap" .pcapng)"
+            python scripts/export_correlated_pcap.py \
+              --pcap "$pcap" \
+              --output "data/parsed/dlteam-fuzz/${stem}.csv"
+          done
+
+      - name: Inspect attack corpus coverage
+        run: |
+          python scripts/inspect_signaling_source.py \
+            --directory data/parsed/dlteam-fuzz \
+            --pattern "*.csv" \
+            --infer-roles \
+            --output data/parsed/dlteam-fuzz/inspection.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dlteam-fuzz-signaling-inspection
+          path: |
+            data/raw/cross-protocol/source_manifest.json
+            data/parsed/dlteam-fuzz/*.csv
+            data/parsed/dlteam-fuzz/inspection.json
