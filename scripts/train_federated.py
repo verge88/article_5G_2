@@ -2,7 +2,8 @@
 """Run framework-independent FedAvg/FedProx training over prepared clients.
 
 Each client keeps deployment-local temporal state inside its TemporalHEATRunner.
-Only trainable shared parameters are exported and aggregated.
+Only trainable shared parameters are exported and aggregated. After the final
+round, every client performs its own benign calibration and test evaluation.
 """
 
 from __future__ import annotations
@@ -15,12 +16,23 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from fedsiggraph.anomaly.calibration import CompositeScoreCalibrator
 from fedsiggraph.federated import (
     extract_shared_parameters,
     load_shared_parameters,
     weighted_average,
 )
-from fedsiggraph.training.temporal_heat import TemporalHEATRunner
+from fedsiggraph.training.metadata import load_test_metadata
+from fedsiggraph.training.metrics import (
+    attack_type_breakdown,
+    calibrate_threshold,
+    evaluate_scores,
+    temporal_duration_ns,
+)
+from fedsiggraph.training.temporal_heat import (
+    TemporalHEATRunner,
+    calibrator_to_dict,
+)
 
 
 @dataclass
@@ -28,6 +40,9 @@ class ClientState:
     name: str
     data_dir: Path
     train: object
+    val: object
+    calibration: object
+    test: object
     preprocessing: dict
     manifest: dict
     runner: TemporalHEATRunner
@@ -43,6 +58,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--rounds", type=int, default=5)
     parser.add_argument("--local-epochs", type=int, default=1)
+    parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument(
         "--strategy",
         choices=["fedavg", "fedprox"],
@@ -58,7 +74,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--heads", type=int, default=4)
     parser.add_argument("--token-mask-prob", type=float, default=0.05)
     parser.add_argument("--continuation-loss-weight", type=float, default=0.25)
+    parser.add_argument("--continuation-score-weight", type=float, default=1.0)
     parser.add_argument("--cross-protocol-weight", type=float, default=2.0)
+    parser.add_argument("--target-fpr", type=float, default=1e-3)
+    parser.add_argument(
+        "--test-memory",
+        choices=["frozen", "safe", "blind"],
+        default="safe",
+    )
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--output", required=True)
     return parser.parse_args()
@@ -81,6 +104,9 @@ def build_clients(args: argparse.Namespace, device: torch.device) -> list[Client
     for index, value in enumerate(args.clients):
         data_dir = Path(value)
         train = load_temporal(data_dir / "train.pt")
+        val = load_temporal(data_dir / "val.pt")
+        calibration = load_temporal(data_dir / "calibration.pt")
+        test = load_temporal(data_dir / "test.pt")
         preprocessing = load_json(data_dir / "preprocessing.json")
         manifest = load_json(data_dir / "manifest.json")
 
@@ -106,10 +132,13 @@ def build_clients(args: argparse.Namespace, device: torch.device) -> list[Client
                 "schema and embedding sizes"
             )
 
+        total_capacity = int(
+            train.num_events + val.num_events + calibration.num_events + test.num_events
+        )
         runner = TemporalHEATRunner(
             train,
             preprocessing=preprocessing,
-            total_capacity=max(int(train.num_events), 1),
+            total_capacity=max(total_capacity, 1),
             neighbors=args.neighbors,
             lr=args.lr,
             event_dim=args.event_dim,
@@ -128,6 +157,9 @@ def build_clients(args: argparse.Namespace, device: torch.device) -> list[Client
                 name=data_dir.name,
                 data_dir=data_dir,
                 train=train,
+                val=val,
+                calibration=calibration,
+                test=test,
                 preprocessing=preprocessing,
                 manifest=manifest,
                 runner=runner,
@@ -139,10 +171,101 @@ def build_clients(args: argparse.Namespace, device: torch.device) -> list[Client
     return states
 
 
+def evaluate_client(
+    client: ClientState,
+    global_parameters,
+    args: argparse.Namespace,
+) -> dict[str, object]:
+    load_shared_parameters(client.runner.model, global_parameters)
+    client.runner.reset_state()
+
+    # Local benign history and calibration remain deployment-private.
+    client.runner.score_stream(client.val, observe="always")
+    calibration_components = client.runner.score_stream(
+        client.calibration,
+        observe="always",
+    )
+    if np.any(calibration_components.labels == 1):
+        raise RuntimeError(
+            f"client {client.name} calibration split contains attack labels"
+        )
+
+    score_calibrator = CompositeScoreCalibrator.fit(
+        calibration_components.base,
+        calibration_components.continuation,
+        calibration_components.context_mask,
+        continuation_weight=args.continuation_score_weight,
+    )
+    calibration_scores = score_calibrator.transform(
+        calibration_components.base,
+        calibration_components.continuation,
+        calibration_components.context_mask,
+    )
+    threshold = calibrate_threshold(calibration_scores, args.target_fpr)
+
+    if client.manifest.get("test_history_mode") == "reset":
+        client.runner.reset_state()
+
+    observe_policy = {
+        "frozen": "never",
+        "safe": "safe",
+        "blind": "always",
+    }[args.test_memory]
+    test_components = client.runner.score_stream(
+        client.test,
+        observe=observe_policy,
+        calibrator=score_calibrator,
+        threshold=threshold if observe_policy == "safe" else None,
+    )
+    test_scores = score_calibrator.transform(
+        test_components.base,
+        test_components.continuation,
+        test_components.context_mask,
+    )
+    metadata = load_test_metadata(
+        client.data_dir
+        / client.manifest.get("test_metadata_file", "test_metadata.csv"),
+        expected_labels=test_components.labels,
+    )
+
+    return {
+        "client": client.name,
+        "threshold": threshold,
+        "score_calibration": calibrator_to_dict(score_calibrator),
+        "test_memory": args.test_memory,
+        "test_history_mode": client.manifest.get("test_history_mode"),
+        "context_coverage_test": (
+            float(test_components.context_mask.mean())
+            if test_components.context_mask.size
+            else 0.0
+        ),
+        "cross_protocol_coverage_test": (
+            float(test_components.cross_protocol_mask.mean())
+            if test_components.cross_protocol_mask.size
+            else 0.0
+        ),
+        "metrics": evaluate_scores(
+            test_components.labels,
+            test_scores,
+            threshold,
+            duration_ns=temporal_duration_ns(
+                client.test,
+                time_unit_ns=int(client.manifest.get("time_unit_ns", 1_000)),
+            ),
+        ),
+        "per_attack": attack_type_breakdown(
+            metadata.attack_types,
+            test_components.labels,
+            test_scores,
+            threshold,
+        ),
+    }
+
+
 def main() -> None:
     args = parse_args()
-    if args.rounds <= 0 or args.local_epochs <= 0:
-        raise ValueError("rounds and local-epochs must be positive")
+    if args.rounds <= 0 or args.local_epochs <= 0 or args.batch_size <= 0:
+        raise ValueError("rounds, local-epochs, and batch-size must be positive")
     if args.strategy == "fedprox" and args.prox_mu < 0:
         raise ValueError("prox-mu must be non-negative")
 
@@ -175,11 +298,16 @@ def main() -> None:
                     cross_coverage,
                 ) = client.runner.train_epoch(
                     client.train,
-                    batch_size=min(512, max(int(client.train.num_events), 1)),
+                    batch_size=min(
+                        args.batch_size,
+                        max(int(client.train.num_events), 1),
+                    ),
                     prox_reference=(
                         global_parameters if args.strategy == "fedprox" else None
                     ),
-                    prox_mu=(args.prox_mu if args.strategy == "fedprox" else 0.0),
+                    prox_mu=(
+                        args.prox_mu if args.strategy == "fedprox" else 0.0
+                    ),
                 )
                 losses.append(loss)
                 endpoint_coverages.append(endpoint_coverage)
@@ -214,6 +342,11 @@ def main() -> None:
         history.append(round_summary)
         print(json.dumps(round_summary, sort_keys=True))
 
+    evaluations = [
+        evaluate_client(client, global_parameters, args)
+        for client in clients
+    ]
+
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     weights_path = output.with_suffix(".pt")
@@ -225,11 +358,14 @@ def main() -> None:
         "prox_mu": args.prox_mu if args.strategy == "fedprox" else 0.0,
         "rounds": args.rounds,
         "local_epochs": args.local_epochs,
+        "batch_size": args.batch_size,
         "seed": args.seed,
         "device": str(device),
+        "target_fpr": args.target_fpr,
         "clients": [client.name for client in clients],
         "shared_parameter_file": str(weights_path),
         "history": history,
+        "evaluations": evaluations,
     }
     with open(output, "w", encoding="utf-8") as handle:
         json.dump(result, handle, indent=2, sort_keys=True)
