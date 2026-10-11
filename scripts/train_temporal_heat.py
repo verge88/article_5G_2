@@ -1,0 +1,438 @@
+#!/usr/bin/env python3
+"""Train TemporalHEAT with causal TGN memory and semantic hard negatives."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+import random
+
+import numpy as np
+import torch
+from torch_geometric.loader import TemporalDataLoader
+from torch_geometric.nn.models.tgn import LastNeighborLoader
+
+from fedsiggraph.models.temporal_heat import TemporalHEAT
+from fedsiggraph.training.history import ObservedHeteroHistoryBank
+from fedsiggraph.training.metrics import (
+    calibrate_threshold,
+    evaluate_scores,
+    temporal_duration_ns,
+)
+from fedsiggraph.training.negatives import (
+    ProcedureNegativeTable,
+    sample_negative_destination,
+)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--data", required=True)
+    parser.add_argument("--epochs", type=int, default=20)
+    parser.add_argument("--batch-size", type=int, default=512)
+    parser.add_argument("--neighbors", type=int, default=32)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--event-dim", type=int, default=64)
+    parser.add_argument("--memory-dim", type=int, default=128)
+    parser.add_argument("--time-dim", type=int, default=32)
+    parser.add_argument("--embedding-dim", type=int, default=128)
+    parser.add_argument("--heads", type=int, default=4)
+    parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--target-fpr", type=float, default=1e-3)
+    parser.add_argument("--token-mask-prob", type=float, default=0.05)
+    parser.add_argument(
+        "--test-memory",
+        choices=["frozen", "safe", "blind"],
+        default="safe",
+    )
+    parser.add_argument("--output")
+    return parser.parse_args()
+
+
+def load_temporal(path: Path):
+    return torch.load(path, weights_only=False)
+
+
+def vocab_sizes_from_preprocessing(preprocessing: dict) -> dict[str, int]:
+    return {
+        name: len(mapping)
+        for name, mapping in preprocessing["vocab"].items()
+    }
+
+
+class TemporalHEATRunner:
+    def __init__(
+        self,
+        train_data,
+        *,
+        preprocessing: dict,
+        total_capacity: int,
+        neighbors: int,
+        lr: float,
+        event_dim: int,
+        memory_dim: int,
+        time_dim: int,
+        embedding_dim: int,
+        heads: int,
+        seed: int,
+        token_mask_prob: float,
+        device: torch.device,
+    ) -> None:
+        if not (0.0 <= token_mask_prob < 1.0):
+            raise ValueError("token_mask_prob must be in [0, 1)")
+
+        self.device = device
+        self.num_nodes = int(train_data.num_nodes)
+        self.event_dim = event_dim
+        self.total_capacity = total_capacity
+        self.token_mask_prob = token_mask_prob
+
+        node_types = preprocessing["node_type_ids"]
+        if len(node_types) != self.num_nodes:
+            raise ValueError(
+                "node_type_ids length does not match prepared num_nodes"
+            )
+        self.node_type_ids = torch.as_tensor(
+            node_types, dtype=torch.long, device=device
+        )
+
+        vocab_sizes = vocab_sizes_from_preprocessing(preprocessing)
+        self.model = TemporalHEAT(
+            num_nodes=self.num_nodes,
+            numeric_dim=int(train_data.msg.size(-1)),
+            vocab_sizes=vocab_sizes,
+            num_node_types=int(preprocessing["num_node_types"]),
+            num_edge_types=vocab_sizes["relation"],
+            event_dim=event_dim,
+            memory_dim=memory_dim,
+            time_dim=time_dim,
+            embedding_dim=embedding_dim,
+            heads=heads,
+        ).to(device)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
+        self.criterion = torch.nn.BCEWithLogitsLoss()
+        self.neighbor_loader = LastNeighborLoader(
+            self.num_nodes,
+            size=neighbors,
+            device=device,
+        )
+        self.assoc = torch.empty(
+            self.num_nodes, dtype=torch.long, device=device
+        )
+        self.history = ObservedHeteroHistoryBank(
+            total_capacity, event_dim
+        )
+        self.procedure_negatives = ProcedureNegativeTable(train_data, seed)
+
+    def reset_state(self) -> None:
+        self.model.reset_state()
+        self.neighbor_loader.reset_state()
+        self.history = ObservedHeteroHistoryBank(
+            self.total_capacity, self.event_dim
+        )
+
+    def _embedding_context(self, nodes: torch.Tensor):
+        n_id, edge_index, e_id = self.neighbor_loader(nodes)
+        self.assoc[n_id] = torch.arange(n_id.size(0), device=self.device)
+
+        memory, last_update = self.model.memory(n_id)
+        edge_t, edge_msg, edge_type = self.history.lookup(
+            e_id, self.device
+        )
+        node_type = self.node_type_ids[n_id]
+        z = self.model.embedding(
+            memory,
+            last_update,
+            edge_index,
+            edge_t,
+            edge_msg,
+            node_type,
+            edge_type,
+        )
+        return z, self.assoc
+
+    def _masked_benign_embedding(self, batch):
+        if self.token_mask_prob <= 0:
+            return self.model.encode_batch(batch)
+
+        def mask(ids: torch.Tensor) -> torch.Tensor:
+            out = ids.clone()
+            selected = torch.rand(
+                ids.shape, device=ids.device
+            ) < self.token_mask_prob
+            out[selected] = 1
+            return out
+
+        return self.model.encode_batch(
+            batch,
+            dst_role_id=mask(batch.dst_role_id),
+            relation_id=mask(batch.relation_id),
+            procedure_id=mask(batch.procedure_id),
+        )
+
+    def train_epoch(
+        self,
+        data,
+        batch_size: int,
+    ) -> tuple[float, float]:
+        self.model.train()
+        self.reset_state()
+        loader = TemporalDataLoader(data, batch_size=batch_size)
+
+        total_loss = 0.0
+        total_events = 0
+        procedure_negative_events = 0
+
+        for batch in loader:
+            batch = batch.to(self.device)
+            self.optimizer.zero_grad()
+
+            src = batch.src
+            pos_dst = batch.dst
+            neg_dst = sample_negative_destination(
+                pos_dst, num_nodes=self.num_nodes
+            )
+            nodes = torch.cat([src, pos_dst, neg_dst]).unique()
+            z, assoc = self._embedding_context(nodes)
+
+            benign_event = self._masked_benign_embedding(batch)
+            endpoint_event = self.model.encode_batch(batch)
+            procedure_ids, procedure_mask = self.procedure_negatives.sample(
+                batch
+            )
+            procedure_event = self.model.encode_batch(
+                batch,
+                procedure_id=procedure_ids,
+            )
+
+            benign_logits = self.model.score_embeddings(
+                z[assoc[src]],
+                z[assoc[pos_dst]],
+                benign_event,
+            )
+            endpoint_logits = self.model.score_embeddings(
+                z[assoc[src]],
+                z[assoc[neg_dst]],
+                endpoint_event,
+            )
+
+            losses = [
+                self.criterion(
+                    benign_logits, torch.zeros_like(benign_logits)
+                ),
+                self.criterion(
+                    endpoint_logits, torch.ones_like(endpoint_logits)
+                ),
+            ]
+
+            if procedure_mask.any():
+                procedure_logits = self.model.score_embeddings(
+                    z[assoc[src[procedure_mask]]],
+                    z[assoc[pos_dst[procedure_mask]]],
+                    procedure_event[procedure_mask],
+                )
+                losses.append(
+                    self.criterion(
+                        procedure_logits,
+                        torch.ones_like(procedure_logits),
+                    )
+                )
+                procedure_negative_events += int(procedure_mask.sum())
+
+            loss = torch.stack(losses).mean()
+            loss.backward()
+            self.optimizer.step()
+
+            with torch.no_grad():
+                observed_msg = self.model.encode_batch(batch)
+                self.model.observe(
+                    src, pos_dst, batch.t, observed_msg
+                )
+                self.neighbor_loader.insert(src, pos_dst)
+                self.history.append(
+                    batch.t,
+                    observed_msg,
+                    batch.relation_id,
+                )
+                self.model.memory.detach()
+
+            n = int(batch.num_events)
+            total_loss += float(loss.detach().cpu()) * n
+            total_events += n
+
+        coverage = procedure_negative_events / max(total_events, 1)
+        return total_loss / max(total_events, 1), coverage
+
+    @torch.no_grad()
+    def score_stream(
+        self,
+        data,
+        *,
+        observe: str,
+        threshold: float | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        if observe not in {"always", "never", "safe"}:
+            raise ValueError(f"unknown observe policy: {observe}")
+        if observe == "safe" and threshold is None:
+            raise ValueError("safe observation requires a threshold")
+
+        self.model.eval()
+        loader = TemporalDataLoader(data, batch_size=1)
+        scores: list[float] = []
+        labels: list[int] = []
+
+        for batch in loader:
+            batch = batch.to(self.device)
+            nodes = torch.cat([batch.src, batch.dst]).unique()
+            z, assoc = self._embedding_context(nodes)
+            event_embedding = self.model.encode_batch(batch)
+            logits = self.model.score_embeddings(
+                z[assoc[batch.src]],
+                z[assoc[batch.dst]],
+                event_embedding,
+            )
+            score = float(logits.sigmoid().item())
+            scores.append(score)
+            labels.append(int(batch.y.item()))
+
+            should_observe = (
+                observe == "always"
+                or (observe == "safe" and score <= float(threshold))
+            )
+            if should_observe:
+                self.model.observe(
+                    batch.src,
+                    batch.dst,
+                    batch.t,
+                    event_embedding,
+                )
+                self.neighbor_loader.insert(batch.src, batch.dst)
+                self.history.append(
+                    batch.t,
+                    event_embedding,
+                    batch.relation_id,
+                )
+                self.model.memory.detach()
+
+        return np.asarray(scores), np.asarray(labels)
+
+
+def main() -> None:
+    args = parse_args()
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+    random.seed(args.seed)
+
+    data_dir = Path(args.data)
+    train = load_temporal(data_dir / "train.pt")
+    val = load_temporal(data_dir / "val.pt")
+    calibration = load_temporal(data_dir / "calibration.pt")
+    test = load_temporal(data_dir / "test.pt")
+
+    with open(
+        data_dir / "preprocessing.json", "r", encoding="utf-8"
+    ) as handle:
+        preprocessing = json.load(handle)
+    with open(data_dir / "manifest.json", "r", encoding="utf-8") as handle:
+        manifest = json.load(handle)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    capacity = int(
+        train.num_events
+        + val.num_events
+        + calibration.num_events
+        + test.num_events
+    )
+    runner = TemporalHEATRunner(
+        train,
+        preprocessing=preprocessing,
+        total_capacity=max(capacity, 1),
+        neighbors=args.neighbors,
+        lr=args.lr,
+        event_dim=args.event_dim,
+        memory_dim=args.memory_dim,
+        time_dim=args.time_dim,
+        embedding_dim=args.embedding_dim,
+        heads=args.heads,
+        seed=args.seed,
+        token_mask_prob=args.token_mask_prob,
+        device=device,
+    )
+
+    losses: list[float] = []
+    coverages: list[float] = []
+    for epoch in range(1, args.epochs + 1):
+        loss, coverage = runner.train_epoch(train, args.batch_size)
+        losses.append(loss)
+        coverages.append(coverage)
+        print(
+            f"epoch={epoch:03d} loss={loss:.6f} "
+            f"procedure_negative_coverage={coverage:.4f}"
+        )
+
+    runner.score_stream(val, observe="always")
+    calibration_scores, calibration_labels = runner.score_stream(
+        calibration,
+        observe="always",
+    )
+    if np.any(calibration_labels == 1):
+        raise RuntimeError("calibration data contains attack labels")
+    threshold = calibrate_threshold(
+        calibration_scores, args.target_fpr
+    )
+
+    if manifest.get("test_history_mode") == "reset":
+        runner.reset_state()
+
+    observe_policy = {
+        "frozen": "never",
+        "safe": "safe",
+        "blind": "always",
+    }[args.test_memory]
+    test_scores, test_labels = runner.score_stream(
+        test,
+        observe=observe_policy,
+        threshold=threshold if observe_policy == "safe" else None,
+    )
+
+    result = {
+        "model": "temporal_heat",
+        "device": str(device),
+        "epochs": args.epochs,
+        "batch_size": args.batch_size,
+        "neighbors": args.neighbors,
+        "learning_rate": args.lr,
+        "event_dim": args.event_dim,
+        "memory_dim": args.memory_dim,
+        "time_dim": args.time_dim,
+        "embedding_dim": args.embedding_dim,
+        "heads": args.heads,
+        "token_mask_prob": args.token_mask_prob,
+        "seed": args.seed,
+        "target_fpr": args.target_fpr,
+        "threshold": threshold,
+        "test_memory": args.test_memory,
+        "test_history_mode": manifest.get("test_history_mode"),
+        "train_loss_final": losses[-1] if losses else None,
+        "procedure_negative_coverage_final": (
+            coverages[-1] if coverages else None
+        ),
+        "metrics": evaluate_scores(
+            test_labels,
+            test_scores,
+            threshold,
+            duration_ns=temporal_duration_ns(test),
+        ),
+    }
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    if args.output:
+        output = Path(args.output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with open(output, "w", encoding="utf-8") as handle:
+            json.dump(result, handle, indent=2, sort_keys=True)
+
+
+if __name__ == "__main__":
+    main()
