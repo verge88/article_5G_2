@@ -7,6 +7,7 @@ on:
       - "scripts/export_correlated_pcap.py"
       - "scripts/fetch_cross_protocol_sources.py"
       - "scripts/inspect_signaling_source.py"
+      - "scripts/inspect_origami_state_machine.py"
       - "src/fedsiggraph/data/causal_correlation.py"
       - "src/fedsiggraph/data/signaling_parser.py"
       - ".github/workflows/origami-data-sanity.yml"
@@ -62,7 +63,7 @@ jobs:
             data/parsed/origami/origami_m_stats.csv
             data/parsed/origami/inspection.json
 
-  official-csv:
+  official-state-machine-csv:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -83,17 +84,16 @@ jobs:
             --output data/raw/cross-protocol-csv \
             --origami csv
 
-      - name: Inspect official parser CSV
+      - name: Inspect official state-machine CSV
         run: |
           mkdir -p data/parsed/origami-official
-          python scripts/inspect_signaling_source.py \
+          python scripts/inspect_origami_state_machine.py \
             --csv data/raw/cross-protocol-csv/origami/example.csv \
-            --infer-roles \
             --output data/parsed/origami-official/inspection.json
 
       - uses: actions/upload-artifact@v4
         with:
-          name: origami-official-csv-inspection
+          name: origami-official-state-machine-inspection
           path: |
             data/raw/cross-protocol-csv/source_manifest.json
             data/parsed/origami-official/inspection.json
