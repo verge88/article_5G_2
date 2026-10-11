@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Train TemporalHEAT with causal TGN memory and semantic hard negatives."""
+"""Train TemporalHEAT with semantic hard negatives and context continuation."""
 
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import json
 from pathlib import Path
 import random
@@ -13,6 +14,8 @@ import torch
 from torch_geometric.loader import TemporalDataLoader
 from torch_geometric.nn.models.tgn import LastNeighborLoader
 
+from fedsiggraph.anomaly.calibration import CompositeScoreCalibrator
+from fedsiggraph.models.continuation import continuation_nll
 from fedsiggraph.models.temporal_heat import TemporalHEAT
 from fedsiggraph.training.history import ObservedHeteroHistoryBank
 from fedsiggraph.training.metrics import (
@@ -24,6 +27,15 @@ from fedsiggraph.training.negatives import (
     ProcedureNegativeTable,
     sample_negative_destination,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class StreamComponents:
+    base: np.ndarray
+    continuation: np.ndarray
+    context_mask: np.ndarray
+    cross_protocol_mask: np.ndarray
+    labels: np.ndarray
 
 
 def parse_args() -> argparse.Namespace:
@@ -41,6 +53,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--target-fpr", type=float, default=1e-3)
     parser.add_argument("--token-mask-prob", type=float, default=0.05)
+    parser.add_argument(
+        "--continuation-loss-weight",
+        type=float,
+        default=0.25,
+        help="Auxiliary causal continuation loss weight; set 0 for ablation.",
+    )
+    parser.add_argument(
+        "--continuation-score-weight",
+        type=float,
+        default=1.0,
+        help="Continuation NLL contribution after benign robust calibration.",
+    )
+    parser.add_argument(
+        "--cross-protocol-weight",
+        type=float,
+        default=2.0,
+        help="Extra training weight for explicit context transitions that change protocol.",
+    )
     parser.add_argument(
         "--test-memory",
         choices=["frozen", "safe", "blind"],
@@ -61,6 +91,27 @@ def vocab_sizes_from_preprocessing(preprocessing: dict) -> dict[str, int]:
     }
 
 
+def calibrator_to_dict(
+    calibrator: CompositeScoreCalibrator,
+) -> dict[str, object]:
+    continuation = (
+        None
+        if calibrator.continuation is None
+        else {
+            "median": calibrator.continuation.median,
+            "scale": calibrator.continuation.scale,
+        }
+    )
+    return {
+        "base": {
+            "median": calibrator.base.median,
+            "scale": calibrator.base.scale,
+        },
+        "continuation": continuation,
+        "continuation_weight": calibrator.continuation_weight,
+    }
+
+
 class TemporalHEATRunner:
     def __init__(
         self,
@@ -77,16 +128,24 @@ class TemporalHEATRunner:
         heads: int,
         seed: int,
         token_mask_prob: float,
+        continuation_loss_weight: float,
+        cross_protocol_weight: float,
         device: torch.device,
     ) -> None:
         if not (0.0 <= token_mask_prob < 1.0):
             raise ValueError("token_mask_prob must be in [0, 1)")
+        if continuation_loss_weight < 0:
+            raise ValueError("continuation_loss_weight must be non-negative")
+        if cross_protocol_weight < 1.0:
+            raise ValueError("cross_protocol_weight must be >= 1")
 
         self.device = device
         self.num_nodes = int(train_data.num_nodes)
         self.event_dim = event_dim
         self.total_capacity = total_capacity
         self.token_mask_prob = token_mask_prob
+        self.continuation_loss_weight = continuation_loss_weight
+        self.cross_protocol_weight = cross_protocol_weight
 
         node_types = preprocessing["node_type_ids"]
         if len(node_types) != self.num_nodes:
@@ -161,7 +220,7 @@ class TemporalHEATRunner:
             selected = torch.rand(
                 ids.shape, device=ids.device
             ) < self.token_mask_prob
-            out[selected] = 1
+            out[selected] = 1  # train-reserved UNK ID
             return out
 
         return self.model.encode_batch(
@@ -171,11 +230,27 @@ class TemporalHEATRunner:
             procedure_id=mask(batch.procedure_id),
         )
 
+    def _continuation_nll(
+        self,
+        z_src: torch.Tensor,
+        z_dst: torch.Tensor,
+        batch,
+    ) -> torch.Tensor:
+        protocol_logits, procedure_logits = self.model.continuation_logits(
+            z_src, z_dst, batch
+        )
+        return continuation_nll(
+            protocol_logits,
+            procedure_logits,
+            protocol_target=batch.protocol_id,
+            procedure_target=batch.procedure_id,
+        )
+
     def train_epoch(
         self,
         data,
         batch_size: int,
-    ) -> tuple[float, float]:
+    ) -> tuple[float, float, float, float]:
         self.model.train()
         self.reset_state()
         loader = TemporalDataLoader(data, batch_size=batch_size)
@@ -183,6 +258,8 @@ class TemporalHEATRunner:
         total_loss = 0.0
         total_events = 0
         procedure_negative_events = 0
+        context_events = 0
+        cross_protocol_events = 0
 
         for batch in loader:
             batch = batch.to(self.device)
@@ -195,6 +272,8 @@ class TemporalHEATRunner:
             )
             nodes = torch.cat([src, pos_dst, neg_dst]).unique()
             z, assoc = self._embedding_context(nodes)
+            z_src = z[assoc[src]]
+            z_pos_dst = z[assoc[pos_dst]]
 
             benign_event = self._masked_benign_embedding(batch)
             endpoint_event = self.model.encode_batch(batch)
@@ -207,17 +286,17 @@ class TemporalHEATRunner:
             )
 
             benign_logits = self.model.score_embeddings(
-                z[assoc[src]],
-                z[assoc[pos_dst]],
+                z_src,
+                z_pos_dst,
                 benign_event,
             )
             endpoint_logits = self.model.score_embeddings(
-                z[assoc[src]],
+                z_src,
                 z[assoc[neg_dst]],
                 endpoint_event,
             )
 
-            losses = [
+            primary_losses = [
                 self.criterion(
                     benign_logits, torch.zeros_like(benign_logits)
                 ),
@@ -228,11 +307,11 @@ class TemporalHEATRunner:
 
             if procedure_mask.any():
                 procedure_logits = self.model.score_embeddings(
-                    z[assoc[src[procedure_mask]]],
-                    z[assoc[pos_dst[procedure_mask]]],
+                    z_src[procedure_mask],
+                    z_pos_dst[procedure_mask],
                     procedure_event[procedure_mask],
                 )
-                losses.append(
+                primary_losses.append(
                     self.criterion(
                         procedure_logits,
                         torch.ones_like(procedure_logits),
@@ -240,10 +319,45 @@ class TemporalHEATRunner:
                 )
                 procedure_negative_events += int(procedure_mask.sum())
 
-            loss = torch.stack(losses).mean()
+            primary_loss = torch.stack(primary_losses).mean()
+            loss = primary_loss
+
+            context_mask = batch.context_history_mask.bool()
+            cross_mask = batch.cross_protocol_mask.bool() & context_mask
+            context_events += int(context_mask.sum())
+            cross_protocol_events += int(cross_mask.sum())
+
+            if (
+                self.continuation_loss_weight > 0
+                and context_mask.any()
+            ):
+                nll = self._continuation_nll(
+                    z_src,
+                    z_pos_dst,
+                    batch,
+                )
+                weights = torch.ones_like(nll)
+                if self.cross_protocol_weight > 1:
+                    weights = torch.where(
+                        cross_mask,
+                        torch.full_like(
+                            weights, self.cross_protocol_weight
+                        ),
+                        weights,
+                    )
+                continuation_loss = (
+                    nll[context_mask] * weights[context_mask]
+                ).mean()
+                loss = (
+                    primary_loss
+                    + self.continuation_loss_weight * continuation_loss
+                )
+
             loss.backward()
             self.optimizer.step()
 
+            # Commit the clean current event only after every score/loss that
+            # depends on pre-event state has been computed.
             with torch.no_grad():
                 observed_msg = self.model.encode_batch(batch)
                 self.model.observe(
@@ -261,8 +375,13 @@ class TemporalHEATRunner:
             total_loss += float(loss.detach().cpu()) * n
             total_events += n
 
-        coverage = procedure_negative_events / max(total_events, 1)
-        return total_loss / max(total_events, 1), coverage
+        denominator = max(total_events, 1)
+        return (
+            total_loss / denominator,
+            procedure_negative_events / denominator,
+            context_events / denominator,
+            cross_protocol_events / denominator,
+        )
 
     @torch.no_grad()
     def score_stream(
@@ -270,36 +389,68 @@ class TemporalHEATRunner:
         data,
         *,
         observe: str,
+        calibrator: CompositeScoreCalibrator | None = None,
         threshold: float | None = None,
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> StreamComponents:
         if observe not in {"always", "never", "safe"}:
             raise ValueError(f"unknown observe policy: {observe}")
-        if observe == "safe" and threshold is None:
-            raise ValueError("safe observation requires a threshold")
+        if observe == "safe" and (
+            threshold is None or calibrator is None
+        ):
+            raise ValueError(
+                "safe observation requires a composite calibrator and threshold"
+            )
 
         self.model.eval()
         loader = TemporalDataLoader(data, batch_size=1)
-        scores: list[float] = []
+        base_scores: list[float] = []
+        continuation_scores: list[float] = []
+        context_masks: list[bool] = []
+        cross_masks: list[bool] = []
         labels: list[int] = []
 
         for batch in loader:
             batch = batch.to(self.device)
             nodes = torch.cat([batch.src, batch.dst]).unique()
             z, assoc = self._embedding_context(nodes)
+            z_src = z[assoc[batch.src]]
+            z_dst = z[assoc[batch.dst]]
+
             event_embedding = self.model.encode_batch(batch)
             logits = self.model.score_embeddings(
-                z[assoc[batch.src]],
-                z[assoc[batch.dst]],
+                z_src,
+                z_dst,
                 event_embedding,
             )
-            score = float(logits.sigmoid().item())
-            scores.append(score)
+            base_score = float(logits.sigmoid().item())
+
+            has_context = bool(batch.context_history_mask.item())
+            is_cross = bool(batch.cross_protocol_mask.item()) and has_context
+            continuation_score = np.nan
+            if has_context:
+                nll = self._continuation_nll(
+                    z_src,
+                    z_dst,
+                    batch,
+                )
+                continuation_score = float(nll.item())
+
+            base_scores.append(base_score)
+            continuation_scores.append(continuation_score)
+            context_masks.append(has_context)
+            cross_masks.append(is_cross)
             labels.append(int(batch.y.item()))
 
-            should_observe = (
-                observe == "always"
-                or (observe == "safe" and score <= float(threshold))
-            )
+            should_observe = observe == "always"
+            if observe == "safe":
+                assert calibrator is not None
+                composite = calibrator.transform(
+                    np.asarray([base_score]),
+                    np.asarray([continuation_score]),
+                    np.asarray([has_context]),
+                )
+                should_observe = float(composite[0]) <= float(threshold)
+
             if should_observe:
                 self.model.observe(
                     batch.src,
@@ -315,11 +466,22 @@ class TemporalHEATRunner:
                 )
                 self.model.memory.detach()
 
-        return np.asarray(scores), np.asarray(labels)
+        return StreamComponents(
+            base=np.asarray(base_scores, dtype=np.float64),
+            continuation=np.asarray(
+                continuation_scores, dtype=np.float64
+            ),
+            context_mask=np.asarray(context_masks, dtype=bool),
+            cross_protocol_mask=np.asarray(cross_masks, dtype=bool),
+            labels=np.asarray(labels, dtype=np.int64),
+        )
 
 
 def main() -> None:
     args = parse_args()
+    if args.continuation_score_weight < 0:
+        raise ValueError("continuation_score_weight must be non-negative")
+
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     random.seed(args.seed)
@@ -357,27 +519,53 @@ def main() -> None:
         heads=args.heads,
         seed=args.seed,
         token_mask_prob=args.token_mask_prob,
+        continuation_loss_weight=args.continuation_loss_weight,
+        cross_protocol_weight=args.cross_protocol_weight,
         device=device,
     )
 
     losses: list[float] = []
-    coverages: list[float] = []
+    procedure_coverages: list[float] = []
+    context_coverages: list[float] = []
+    cross_coverages: list[float] = []
+
     for epoch in range(1, args.epochs + 1):
-        loss, coverage = runner.train_epoch(train, args.batch_size)
+        (
+            loss,
+            procedure_coverage,
+            context_coverage,
+            cross_coverage,
+        ) = runner.train_epoch(train, args.batch_size)
         losses.append(loss)
-        coverages.append(coverage)
+        procedure_coverages.append(procedure_coverage)
+        context_coverages.append(context_coverage)
+        cross_coverages.append(cross_coverage)
         print(
             f"epoch={epoch:03d} loss={loss:.6f} "
-            f"procedure_negative_coverage={coverage:.4f}"
+            f"procedure_negative_coverage={procedure_coverage:.4f} "
+            f"context_coverage={context_coverage:.4f} "
+            f"cross_protocol_coverage={cross_coverage:.4f}"
         )
 
     runner.score_stream(val, observe="always")
-    calibration_scores, calibration_labels = runner.score_stream(
+    calibration_components = runner.score_stream(
         calibration,
         observe="always",
     )
-    if np.any(calibration_labels == 1):
+    if np.any(calibration_components.labels == 1):
         raise RuntimeError("calibration data contains attack labels")
+
+    score_calibrator = CompositeScoreCalibrator.fit(
+        calibration_components.base,
+        calibration_components.continuation,
+        calibration_components.context_mask,
+        continuation_weight=args.continuation_score_weight,
+    )
+    calibration_scores = score_calibrator.transform(
+        calibration_components.base,
+        calibration_components.continuation,
+        calibration_components.context_mask,
+    )
     threshold = calibrate_threshold(
         calibration_scores, args.target_fpr
     )
@@ -390,14 +578,27 @@ def main() -> None:
         "safe": "safe",
         "blind": "always",
     }[args.test_memory]
-    test_scores, test_labels = runner.score_stream(
+    test_components = runner.score_stream(
         test,
         observe=observe_policy,
+        calibrator=score_calibrator,
         threshold=threshold if observe_policy == "safe" else None,
     )
+    test_scores = score_calibrator.transform(
+        test_components.base,
+        test_components.continuation,
+        test_components.context_mask,
+    )
+
+    test_context_coverage = float(
+        test_components.context_mask.mean()
+    ) if test_components.context_mask.size else 0.0
+    test_cross_coverage = float(
+        test_components.cross_protocol_mask.mean()
+    ) if test_components.cross_protocol_mask.size else 0.0
 
     result = {
-        "model": "temporal_heat",
+        "model": "temporal_heat_context_continuation",
         "device": str(device),
         "epochs": args.epochs,
         "batch_size": args.batch_size,
@@ -409,17 +610,29 @@ def main() -> None:
         "embedding_dim": args.embedding_dim,
         "heads": args.heads,
         "token_mask_prob": args.token_mask_prob,
+        "continuation_loss_weight": args.continuation_loss_weight,
+        "continuation_score_weight": args.continuation_score_weight,
+        "cross_protocol_weight": args.cross_protocol_weight,
         "seed": args.seed,
         "target_fpr": args.target_fpr,
         "threshold": threshold,
+        "score_calibration": calibrator_to_dict(score_calibrator),
         "test_memory": args.test_memory,
         "test_history_mode": manifest.get("test_history_mode"),
         "train_loss_final": losses[-1] if losses else None,
         "procedure_negative_coverage_final": (
-            coverages[-1] if coverages else None
+            procedure_coverages[-1] if procedure_coverages else None
         ),
+        "context_coverage_train_final": (
+            context_coverages[-1] if context_coverages else None
+        ),
+        "cross_protocol_coverage_train_final": (
+            cross_coverages[-1] if cross_coverages else None
+        ),
+        "context_coverage_test": test_context_coverage,
+        "cross_protocol_coverage_test": test_cross_coverage,
         "metrics": evaluate_scores(
-            test_labels,
+            test_components.labels,
             test_scores,
             threshold,
             duration_ns=temporal_duration_ns(test),
