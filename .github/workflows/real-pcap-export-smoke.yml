@@ -37,10 +37,10 @@ jobs:
         run: |
           mkdir -p experiments/pcap-real-smoke/raw
           for suffix in a b c d e f g h; do
-            name="007\${suffix}-fuzz-open5gs.pcapng"
+            name="007${suffix}-fuzz-open5gs.pcapng"
             curl -L --fail \
-              "https://raw.githubusercontent.com/DLTeamTUC/5GDatasets/main/pcap/\${name}" \
-              -o "experiments/pcap-real-smoke/raw/\${name}"
+              "https://raw.githubusercontent.com/DLTeamTUC/5GDatasets/main/pcap/${name}" \
+              -o "experiments/pcap-real-smoke/raw/${name}"
           done
 
       - name: Probe protocol and causal-context coverage
