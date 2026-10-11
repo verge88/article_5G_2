@@ -12,6 +12,10 @@ on:
       - "scripts/run_granomaly_suite.py"
       - ".github/workflows/granomaly-real-ablation.yml"
 
+concurrency:
+  group: granomaly-real-ablation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   nrf-smf-ablation:
     runs-on: ubuntu-latest
