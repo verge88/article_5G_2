@@ -1,0 +1,64 @@
+name: granomaly-real-smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "feat/fedsiggraph-v1"
+    paths:
+      - ".github/workflows/granomaly-real-smoke.yml"
+
+jobs:
+  nrf-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install CPU PyTorch
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install FedSigGraph
+        run: pip install -e ".[ml,dev]"
+
+      - name: Run one-seed real NRF smoke benchmark
+        run: |
+          python scripts/run_granomaly_suite.py \
+            --workspace experiments/granomaly-real-smoke \
+            --experiments nrf \
+            --models \
+              numeric_tgn \
+              semantic_tgn \
+              temporal_heat_continuation_immediate \
+              temporal_heat_continuation \
+            --seeds 1 \
+            --epochs 1 \
+            --batch-size 1024 \
+            --neighbors 16 \
+            --test-memory safe
+
+      - name: Render smoke table
+        if: success()
+        run: |
+          python scripts/render_results.py \
+            --summary experiments/granomaly-real-smoke/results/nrf/summary.json \
+            --format markdown \
+            --output experiments/granomaly-real-smoke/nrf_table.md
+          cat experiments/granomaly-real-smoke/nrf_table.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload real smoke outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: granomaly-real-nrf-smoke
+          path: experiments/granomaly-real-smoke/
+          if-no-files-found: warn
+          retention-days: 30
