@@ -26,6 +26,12 @@ _UUID_RE = re.compile(
 _IMSI_RE = re.compile(r"^imsi-\d+$", re.IGNORECASE)
 _LONG_HEX_RE = re.compile(r"^[0-9a-f]{12,}$", re.IGNORECASE)
 
+_IMSI_PATH_RE = re.compile(r"/(imsi-\d+)(?:/|$)", re.IGNORECASE)
+_SM_CONTEXT_RE = re.compile(r"/sm-contexts/([^/?\s,]+)", re.IGNORECASE)
+_SM_POLICY_RE = re.compile(r"/sm-policies/([^/?\s,]+)", re.IGNORECASE)
+_UE_AUTH_RE = re.compile(r"/ue-authentications/([^/?\s,]+)", re.IGNORECASE)
+_SMF_REG_RE = re.compile(r"/smf-registrations/(\d+)(?:/|$)", re.IGNORECASE)
+
 
 @dataclass(frozen=True, slots=True)
 class ParsedSemantics:
@@ -37,6 +43,41 @@ class ParsedSemantics:
     result_code: Optional[str] = None
     cause: Optional[str] = None
     stream_id: Optional[str] = None
+    ue_context: Optional[str] = None
+    session_context: Optional[str] = None
+
+
+def extract_sbi_context(path: str) -> tuple[str | None, str | None]:
+    """Extract only identifiers explicitly present in an SBI URI.
+
+    Context values are deployment-local and are never intended for federation.
+    No temporal guessing is performed when the URI does not expose a context.
+    """
+    path_only = path.split("?", 1)[0]
+
+    imsi_match = _IMSI_PATH_RE.search(path_only)
+    ue_context = imsi_match.group(1).lower() if imsi_match else None
+
+    session_context: str | None = None
+    match = _SM_CONTEXT_RE.search(path_only)
+    if match:
+        session_context = f"sm-context:{match.group(1)}"
+    else:
+        match = _SM_POLICY_RE.search(path_only)
+        if match:
+            session_context = f"sm-policy:{match.group(1)}"
+        else:
+            match = _UE_AUTH_RE.search(path_only)
+            if match:
+                session_context = f"ue-auth:{match.group(1)}"
+            else:
+                match = _SMF_REG_RE.search(path_only)
+                if match and ue_context:
+                    session_context = (
+                        f"pdu-session:{ue_context}:{match.group(1)}"
+                    )
+
+    return ue_context, session_context
 
 
 def normalize_sbi_path(path: str) -> str:
@@ -129,7 +170,9 @@ def parse_granomaly_semantics(stack: str, combined_info: str) -> ParsedSemantics
         request = _HTTP_REQUEST_RE.search(info)
         if request:
             method = request.group("method").upper()
-            path = normalize_sbi_path(request.group("path"))
+            raw_path = request.group("path")
+            ue_context, session_context = extract_sbi_context(raw_path)
+            path = normalize_sbi_path(raw_path)
             return ParsedSemantics(
                 protocol="SBI",
                 relation=_sbi_service(path),
@@ -137,6 +180,8 @@ def parse_granomaly_semantics(stack: str, combined_info: str) -> ParsedSemantics
                 message_type="HTTP2_REQUEST",
                 direction="REQUEST",
                 stream_id=request.group("stream"),
+                ue_context=ue_context,
+                session_context=session_context,
             )
 
         response = _HTTP_RESPONSE_RE.search(info)
@@ -181,7 +226,6 @@ def parse_granomaly_semantics(stack: str, combined_info: str) -> ParsedSemantics
 
     if "ngap" in lower_stack:
         first = info.split(",", 1)[0].strip()
-        # Some captures contain SCTP control text despite an NGAP dissector stack.
         if not first or first.startswith(("SACK", "HEARTBEAT")):
             return _transport_semantics(stack, info)
 
@@ -195,8 +239,6 @@ def parse_granomaly_semantics(stack: str, combined_info: str) -> ParsedSemantics
         has_nas = "nas-5gs" in lower_stack or "nas_5gs" in lower_stack
         if has_nas and "," in info:
             nas_message = info.split(",", 1)[1].strip()
-            # Combined exports can contain multiple decoded messages; the first
-            # NAS item is the stable causal label.
             nas_message = nas_message.split(",", 1)[0].strip()
             return ParsedSemantics(
                 protocol="NAS",
