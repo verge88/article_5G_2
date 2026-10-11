@@ -12,6 +12,7 @@ on:
           - quick
           - standard
           - robust
+          - publication
       epochs:
         description: Training epochs per model/seed
         required: true
@@ -62,7 +63,8 @@ jobs:
           case "${{ inputs.profile }}" in
             quick)    echo "seeds=1" >> "$GITHUB_OUTPUT" ;;
             standard) echo "seeds=1 2 3" >> "$GITHUB_OUTPUT" ;;
-            robust)   echo "seeds=1 2 3 4 5" >> "$GITHUB_OUTPUT" ;;
+            robust)      echo "seeds=1 2 3 4 5" >> "$GITHUB_OUTPUT" ;;
+            publication) echo "seeds=1 2 3 4 5 6 7 8 9 10" >> "$GITHUB_OUTPUT" ;;
           esac
 
           case "${{ inputs.experiments }}" in
