@@ -90,6 +90,7 @@ class TemporalHEATRunner:
         continuation_loss_weight: float,
         cross_protocol_weight: float,
         device: torch.device,
+        local_adapter_dim: int = 0,
     ) -> None:
         if not (0.0 <= token_mask_prob < 1.0):
             raise ValueError("token_mask_prob must be in [0, 1)")
@@ -127,6 +128,7 @@ class TemporalHEATRunner:
             time_dim=time_dim,
             embedding_dim=embedding_dim,
             heads=heads,
+            local_adapter_dim=local_adapter_dim,
         ).to(device)
         self.lr = float(lr)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
