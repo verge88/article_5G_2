@@ -37,14 +37,14 @@ jobs:
         run: |
           mkdir -p experiments/pcap-real-smoke
           curl -L --fail \
-            https://raw.githubusercontent.com/DLTeamTUC/5GDatasets/main/pcap/007a-fuzz-open5gs.pcapng \
-            -o experiments/pcap-real-smoke/007a-fuzz-open5gs.pcapng
+            https://raw.githubusercontent.com/DLTeamTUC/5GDatasets/main/pcap/007c-fuzz-open5gs.pcapng \
+            -o experiments/pcap-real-smoke/007c-fuzz-open5gs.pcapng
 
       - name: Export causally correlated signaling
         run: |
           python scripts/export_correlated_pcap.py \
-            --pcap experiments/pcap-real-smoke/007a-fuzz-open5gs.pcapng \
-            --output experiments/pcap-real-smoke/007a-correlated.csv \
+            --pcap experiments/pcap-real-smoke/007c-fuzz-open5gs.pcapng \
+            --output experiments/pcap-real-smoke/007c-correlated.csv \
             | tee experiments/pcap-real-smoke/export_counts.json
 
       - name: Inspect canonical event coverage
@@ -55,9 +55,9 @@ jobs:
           from fedsiggraph.data import SignalingParserAdapter
 
           events = SignalingParserAdapter(
-              "dltuc-open5gs-007a"
+              "dltuc-open5gs-007c"
           ).from_csv(
-              "experiments/pcap-real-smoke/007a-correlated.csv",
+              "experiments/pcap-real-smoke/007c-correlated.csv",
               label=1,
               attack_type="malformed_nas_fuzz",
           )
@@ -82,6 +82,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dltuc-open5gs-007a-correlated
+          name: dltuc-open5gs-007c-correlated
           path: experiments/pcap-real-smoke/
           retention-days: 30
