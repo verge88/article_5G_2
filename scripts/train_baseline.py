@@ -15,10 +15,12 @@ from torch_geometric.nn.models.tgn import LastNeighborLoader
 from fedsiggraph.baselines.tgn import CausalTGNBaseline
 from fedsiggraph.training.history import ObservedHistoryBank
 from fedsiggraph.training.metrics import (
+    attack_type_breakdown,
     calibrate_threshold,
     evaluate_scores,
     temporal_duration_ns,
 )
+from fedsiggraph.training.metadata import load_test_metadata
 
 
 def parse_args() -> argparse.Namespace:
@@ -273,6 +275,11 @@ def main() -> None:
         threshold=threshold if observe_policy == "safe" else None,
     )
 
+    metadata = load_test_metadata(
+        data_dir / manifest.get("test_metadata_file", "test_metadata.csv"),
+        expected_labels=test_labels,
+    )
+
     result = {
         "model": "causal_numeric_tgn",
         "device": str(device),
@@ -291,6 +298,12 @@ def main() -> None:
             test_scores,
             threshold,
             duration_ns=temporal_duration_ns(test),
+        ),
+        "per_attack": attack_type_breakdown(
+            metadata.attack_types,
+            test_labels,
+            test_scores,
+            threshold,
         ),
     }
 
