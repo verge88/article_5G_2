@@ -19,10 +19,12 @@ from fedsiggraph.models.continuation import continuation_nll
 from fedsiggraph.models.temporal_heat import TemporalHEAT
 from fedsiggraph.training.history import ObservedHeteroHistoryBank
 from fedsiggraph.training.metrics import (
+    attack_type_breakdown,
     calibrate_threshold,
     evaluate_scores,
     temporal_duration_ns,
 )
+from fedsiggraph.training.metadata import load_test_metadata
 from fedsiggraph.training.negatives import (
     ProcedureNegativeTable,
     sample_negative_destination,
@@ -597,6 +599,11 @@ def main() -> None:
         test_components.cross_protocol_mask.mean()
     ) if test_components.cross_protocol_mask.size else 0.0
 
+    metadata = load_test_metadata(
+        data_dir / manifest.get("test_metadata_file", "test_metadata.csv"),
+        expected_labels=test_components.labels,
+    )
+
     result = {
         "model": "temporal_heat_context_continuation",
         "device": str(device),
@@ -636,6 +643,12 @@ def main() -> None:
             test_scores,
             threshold,
             duration_ns=temporal_duration_ns(test),
+        ),
+        "per_attack": attack_type_breakdown(
+            metadata.attack_types,
+            test_components.labels,
+            test_scores,
+            threshold,
         ),
     }
 
