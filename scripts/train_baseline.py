@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Train and evaluate the causal Granomaly-style TGN baseline."""
+"""Train and evaluate the causal numeric TGN baseline."""
 
 from __future__ import annotations
 
@@ -9,18 +9,16 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from sklearn.metrics import (
-    average_precision_score,
-    confusion_matrix,
-    f1_score,
-    precision_score,
-    recall_score,
-    roc_auc_score,
-)
 from torch_geometric.loader import TemporalDataLoader
 from torch_geometric.nn.models.tgn import LastNeighborLoader
 
 from fedsiggraph.baselines.tgn import CausalTGNBaseline
+from fedsiggraph.training.history import ObservedHistoryBank
+from fedsiggraph.training.metrics import (
+    calibrate_threshold,
+    evaluate_scores,
+    temporal_duration_ns,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -46,33 +44,6 @@ def load_temporal(path: Path):
     # PyTorch >=2.6 defaults to weights_only=True. TemporalData is a trusted
     # local experiment artifact, so explicitly opt into object deserialization.
     return torch.load(path, weights_only=False)
-
-
-class ObservedHistoryBank:
-    """Edge features indexed exactly like LastNeighborLoader insertion IDs."""
-
-    def __init__(self, capacity: int, msg_dim: int) -> None:
-        self.t = torch.empty(capacity, dtype=torch.long)
-        self.msg = torch.empty((capacity, msg_dim), dtype=torch.float32)
-        self.size = 0
-
-    def append(self, t: torch.Tensor, msg: torch.Tensor) -> None:
-        n = int(t.numel())
-        if self.size + n > self.t.size(0):
-            raise RuntimeError("history bank capacity exceeded")
-        self.t[self.size : self.size + n] = t.detach().cpu()
-        self.msg[self.size : self.size + n] = msg.detach().cpu()
-        self.size += n
-
-    def lookup(
-        self,
-        e_id: torch.Tensor,
-        device: torch.device,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        index = e_id.detach().cpu()
-        if index.numel() and int(index.max()) >= self.size:
-            raise RuntimeError("neighbor loader requested an unobserved edge ID")
-        return self.t[index].to(device), self.msg[index].to(device)
 
 
 class Runner:
@@ -115,13 +86,9 @@ class Runner:
         self.neighbor_loader.reset_state()
         self.history = ObservedHistoryBank(self.total_capacity, self.msg_dim)
 
-    def _embedding_context(
-        self,
-        nodes: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    def _embedding_context(self, nodes: torch.Tensor):
         n_id, edge_index, e_id = self.neighbor_loader(nodes)
         self.assoc[n_id] = torch.arange(n_id.size(0), device=self.device)
-
         memory, last_update = self.model.memory(n_id)
         edge_t, edge_msg = self.history.lookup(e_id, self.device)
         z = self.model.embedding(
@@ -141,7 +108,6 @@ class Runner:
     ) -> torch.Tensor:
         collision = neg_dst == pos_dst
         if collision.any():
-            # IDs 1..num_nodes-1 are train-known nodes; node 0 is UNK.
             shifted = (neg_dst[collision] % (num_nodes - 1)) + 1
             neg_dst = neg_dst.clone()
             neg_dst[collision] = shifted
@@ -196,7 +162,7 @@ class Runner:
             loss.backward()
             self.optimizer.step()
 
-            # Causal invariant: commit the positive event only after scoring.
+            # Score first, observe second.
             with torch.no_grad():
                 self.model.observe(src, pos_dst, batch.t, batch.msg)
                 self.neighbor_loader.insert(src, pos_dst)
@@ -252,54 +218,6 @@ class Runner:
         return np.asarray(scores), np.asarray(labels)
 
 
-def calibrate_threshold(scores: np.ndarray, target_fpr: float) -> float:
-    if not (0.0 < target_fpr < 1.0):
-        raise ValueError("target_fpr must be in (0, 1)")
-    if scores.size == 0:
-        raise ValueError("calibration split is empty")
-    return float(
-        np.quantile(scores, 1.0 - target_fpr, method="higher")
-    )
-
-
-def safe_auc(metric, y_true: np.ndarray, y_score: np.ndarray) -> float | None:
-    if np.unique(y_true).size < 2:
-        return None
-    return float(metric(y_true, y_score))
-
-
-def evaluate(
-    y_true: np.ndarray,
-    y_score: np.ndarray,
-    threshold: float,
-    data,
-) -> dict[str, float | int | None]:
-    pred = (y_score > threshold).astype(np.int64)
-    tn, fp, fn, tp = confusion_matrix(y_true, pred, labels=[0, 1]).ravel()
-
-    duration_hours = 0.0
-    if data.num_events > 1:
-        duration_units = int(data.t.max()) - int(data.t.min())
-        duration_ns = duration_units * int(data.time_unit_ns)
-        duration_hours = duration_ns / 1e9 / 3600.0
-
-    return {
-        "pr_auc": safe_auc(average_precision_score, y_true, y_score),
-        "roc_auc": safe_auc(roc_auc_score, y_true, y_score),
-        "f1": float(f1_score(y_true, pred, zero_division=0)),
-        "precision": float(precision_score(y_true, pred, zero_division=0)),
-        "recall": float(recall_score(y_true, pred, zero_division=0)),
-        "tn": int(tn),
-        "fp": int(fp),
-        "fn": int(fn),
-        "tp": int(tp),
-        "false_positive_rate": float(fp / max(fp + tn, 1)),
-        "false_alarms_per_hour": (
-            float(fp / duration_hours) if duration_hours > 0 else None
-        ),
-    }
-
-
 def main() -> None:
     args = parse_args()
     torch.manual_seed(args.seed)
@@ -332,8 +250,6 @@ def main() -> None:
         losses.append(loss)
         print(f"epoch={epoch:03d} loss={loss:.6f}")
 
-    # The final training epoch leaves memory in train state. Validation is a
-    # benign temporal warm-up only; it is not used to tune the threshold.
     runner.score_stream(val, observe="always")
     calibration_scores, calibration_labels = runner.score_stream(
         calibration,
@@ -358,7 +274,7 @@ def main() -> None:
     )
 
     result = {
-        "model": "causal_tgn_baseline",
+        "model": "causal_numeric_tgn",
         "device": str(device),
         "epochs": args.epochs,
         "batch_size": args.batch_size,
@@ -370,7 +286,12 @@ def main() -> None:
         "test_memory": args.test_memory,
         "test_history_mode": manifest.get("test_history_mode"),
         "train_loss_final": losses[-1] if losses else None,
-        "metrics": evaluate(test_labels, test_scores, threshold, test),
+        "metrics": evaluate_scores(
+            test_labels,
+            test_scores,
+            threshold,
+            duration_ns=temporal_duration_ns(test),
+        ),
     }
 
     print(json.dumps(result, indent=2, sort_keys=True))
