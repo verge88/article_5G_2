@@ -83,3 +83,19 @@ def test_split_does_not_cut_equal_timestamp_group():
 
     assert ({2, 3} <= train_ids) or ({2, 3} <= val_ids)
     assert not ({2} <= train_ids and {3} <= val_ids)
+
+
+def test_split_allows_zero_validation_fraction():
+    benign = [event(i, i * 100, f"P{i}") for i in range(1, 7)]
+    test = [event(20, 1_000, "Attack", label=1)]
+
+    splits = split_benign_development(
+        benign,
+        test,
+        train_fraction=0.5,
+        val_fraction=0.0,
+    )
+
+    assert len(splits.val) == 0
+    assert len(splits.train) > 0
+    assert len(splits.calibration) > 0
