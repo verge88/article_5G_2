@@ -44,7 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", default="data/raw/cross-protocol")
     parser.add_argument(
         "--origami",
-        choices=["none", "readme", "example"],
+        choices=["none", "readme", "pcap", "csv", "example"],
         default="readme",
         help=(
             "Download only metadata, or the 125 MB example CSV and small example PCAP."
@@ -139,6 +139,10 @@ def main() -> None:
     origami_names: list[str] = []
     if args.origami == "readme":
         origami_names = ["README.md"]
+    elif args.origami == "pcap":
+        origami_names = ["README.md", "example.pcap.gz"]
+    elif args.origami == "csv":
+        origami_names = ["README.md", "example.csv"]
     elif args.origami == "example":
         origami_names = ["README.md", "example.csv", "example.pcap.gz"]
 
