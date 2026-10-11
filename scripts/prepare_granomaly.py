@@ -256,6 +256,7 @@ def main() -> None:
         },
         "test_metadata_file": "test_metadata.csv",
         "time_unit": "microseconds",
+        "time_unit_ns": 1_000,
     }
     with open(
         output_dir / "manifest.json", "w", encoding="utf-8"
