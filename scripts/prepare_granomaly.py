@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 from pathlib import Path
 
@@ -146,6 +147,42 @@ def main() -> None:
     torch.save(calibration_data, output_dir / "calibration.pt")
     torch.save(test_data, output_dir / "test.pt")
 
+    # Evaluation-only sidecar. Attack family labels never enter tensors,
+    # vocabulary fitting, scaling, training, or threshold calibration.
+    with open(
+        output_dir / "test_metadata.csv",
+        "w",
+        encoding="utf-8",
+        newline="",
+    ) as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "event_index",
+                "event_id",
+                "timestamp_ns",
+                "label",
+                "attack_type",
+                "protocol",
+                "relation",
+                "procedure",
+            ],
+        )
+        writer.writeheader()
+        for event_index, event in enumerate(splits.test):
+            writer.writerow(
+                {
+                    "event_index": event_index,
+                    "event_id": event.event_id,
+                    "timestamp_ns": event.timestamp_ns,
+                    "label": -1 if event.label is None else event.label,
+                    "attack_type": event.attack_type or "normal",
+                    "protocol": event.protocol,
+                    "relation": event.relation,
+                    "procedure": event.procedure,
+                }
+            )
+
     test_protocol_ids = [
         fitted.vocab.protocol.encode(event.protocol) for event in splits.test
     ]
@@ -208,6 +245,7 @@ def main() -> None:
             "procedure": unknown_rate(test_procedure_ids),
             "dst_role": unknown_rate(test_dst_role_ids),
         },
+        "test_metadata_file": "test_metadata.csv",
         "time_unit": "microseconds",
     }
     with open(
