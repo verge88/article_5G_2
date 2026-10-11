@@ -131,12 +131,52 @@ def aggregate_results(
                 ),
             }
 
+        continuation_gain: dict[str, dict] = {}
+        for scope_name, path in (
+            ("overall", ("metrics",)),
+            ("cross_protocol", ("cross_protocol", "metrics")),
+        ):
+            gains: dict[str, list[float]] = defaultdict(list)
+            for run in runs:
+                ablation = run.get("score_ablation", {})
+                base = ablation.get("base", {})
+                composite = ablation.get("composite", {})
+
+                if scope_name == "overall":
+                    base_metrics = base.get("metrics", {})
+                    composite_metrics = composite.get("metrics", {})
+                else:
+                    base_scope = base.get("cross_protocol", {})
+                    composite_scope = composite.get("cross_protocol", {})
+                    if not (
+                        base_scope.get("eligible")
+                        and composite_scope.get("eligible")
+                    ):
+                        continue
+                    base_metrics = base_scope.get("metrics", {}) or {}
+                    composite_metrics = composite_scope.get("metrics", {}) or {}
+
+                for key in _METRIC_KEYS:
+                    base_value = base_metrics.get(key)
+                    composite_value = composite_metrics.get(key)
+                    if base_value is None or composite_value is None:
+                        continue
+                    gains[key].append(
+                        float(composite_value) - float(base_value)
+                    )
+
+            continuation_gain[scope_name] = {
+                key: _summary(values)
+                for key, values in sorted(gains.items())
+            }
+
         output[model] = {
             "runs": len(runs),
             "seeds": [run.get("seed") for run in runs],
             "metrics": metrics,
             "scope_metrics": scope_metrics,
             "score_ablation": score_ablation,
+            "continuation_gain": continuation_gain,
             "per_attack": per_attack,
         }
 
