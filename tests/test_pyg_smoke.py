@@ -3,15 +3,23 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torch_geometric")
 
+from torch_geometric.loader import TemporalDataLoader
+
 from fedsiggraph.baselines.tgn import CausalTGNBaseline
 from fedsiggraph.data.features import CausalNumericFeatureEncoder
 from fedsiggraph.data.index import LocalNodeIndex
 from fedsiggraph.data.pyg import to_temporal_data
 from fedsiggraph.data.schema import CanonicalEvent
 from fedsiggraph.data.vocab import SemanticVocabularies
+from fedsiggraph.models.semantic_tgn import SemanticCausalTGN
 
 
-def event(event_id: int, timestamp_ns: int) -> CanonicalEvent:
+def event(
+    event_id: int,
+    timestamp_ns: int,
+    *,
+    procedure: str = "CreateSMContext",
+) -> CanonicalEvent:
     return CanonicalEvent(
         event_id=event_id,
         timestamp_ns=timestamp_ns,
@@ -24,18 +32,22 @@ def event(event_id: int, timestamp_ns: int) -> CanonicalEvent:
         dst_role="SMF",
         protocol="SBI",
         relation="Nsmf_PDUSession",
-        procedure="CreateSMContext",
+        procedure=procedure,
+        message_type="HTTP2_REQUEST",
+        direction="REQUEST",
         packet_length=256,
         label=0,
     )
 
 
-def test_temporal_data_and_tgn_baseline_construct():
-    events = [event(1, 1_000_000), event(2, 2_000_000)]
+def build_toy_data():
+    events = [
+        event(1, 1_000_000),
+        event(2, 2_000_000, procedure="UpdateSMContext"),
+    ]
     vocab = SemanticVocabularies.fit(events)
     node_index = LocalNodeIndex.fit(events)
     numeric = CausalNumericFeatureEncoder.fit(events)
-
     data = to_temporal_data(
         events,
         vocab=vocab,
@@ -43,6 +55,11 @@ def test_temporal_data_and_tgn_baseline_construct():
         numeric_encoder=numeric,
         time_origin_ns=events[0].timestamp_ns,
     )
+    return data, vocab
+
+
+def test_temporal_data_and_tgn_baseline_construct():
+    data, _ = build_toy_data()
 
     assert data.num_events == 2
     assert data.msg.shape == (2, 4)
@@ -59,5 +76,44 @@ def test_temporal_data_and_tgn_baseline_construct():
     logits = model.score_embeddings(
         torch.zeros((1, 16)),
         torch.zeros((1, 16)),
+    )
+    assert logits.shape == (1, 1)
+
+
+def test_temporal_loader_preserves_semantic_attributes():
+    data, vocab = build_toy_data()
+    batch = next(iter(TemporalDataLoader(data, batch_size=1)))
+
+    assert batch.protocol_id.shape == (1,)
+    assert batch.relation_id.shape == (1,)
+    assert batch.procedure_id.shape == (1,)
+    assert batch.src_role_id.shape == (1,)
+    assert batch.dst_role_id.shape == (1,)
+
+    sizes = {
+        "src_role": len(vocab.src_role),
+        "dst_role": len(vocab.dst_role),
+        "protocol": len(vocab.protocol),
+        "relation": len(vocab.relation),
+        "procedure": len(vocab.procedure),
+        "message_type": len(vocab.message_type),
+        "direction": len(vocab.direction),
+    }
+    model = SemanticCausalTGN(
+        num_nodes=data.num_nodes,
+        numeric_dim=data.msg.size(-1),
+        vocab_sizes=sizes,
+        event_dim=16,
+        memory_dim=16,
+        time_dim=16,
+        embedding_dim=16,
+    )
+    encoded = model.encode_batch(batch)
+    assert encoded.shape == (1, 16)
+
+    logits = model.score_embeddings(
+        torch.zeros((1, 16)),
+        torch.zeros((1, 16)),
+        encoded,
     )
     assert logits.shape == (1, 1)
