@@ -9,10 +9,14 @@ never retroactively annotate earlier rows.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import csv
+import gzip
 import json
 from pathlib import Path
 import re
+import shutil
+import tempfile
 from typing import Iterable
 
 from fedsiggraph.data.causal_correlation import CausalCorrelationTracker
@@ -337,6 +341,29 @@ def pfcp_rows(packet, tracker: CausalCorrelationTracker) -> list[dict[str, str]]
     ]
 
 
+@contextmanager
+def materialized_capture(path: str | Path):
+    source = Path(path)
+    if source.suffix != ".gz":
+        yield source
+        return
+
+    suffix = Path(source.stem).suffix or ".pcap"
+    fd, temporary_name = tempfile.mkstemp(
+        prefix="fedsiggraph-",
+        suffix=suffix,
+    )
+    temporary = Path(temporary_name)
+    try:
+        import os
+        os.close(fd)
+        with gzip.open(source, "rb") as src, open(temporary, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+        yield temporary
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def export_pcap(
     pcap: str | Path,
     output: str | Path,
@@ -370,32 +397,33 @@ def export_pcap(
         )
         writer.writeheader()
 
-        capture = pyshark.FileCapture(
-            str(pcap),
-            display_filter=display_filter,
-            keep_packets=False,
-        )
-        try:
-            for packet in capture:
-                rows: list[tuple[str, dict[str, str]]] = []
-                if hasattr(packet, "ngap"):
-                    rows.extend(
-                        ("NGAP", row) for row in ngap_rows(packet, tracker)
-                    )
-                if hasattr(packet, "http2"):
-                    rows.extend(
-                        ("SBI", row) for row in http2_rows(packet, tracker)
-                    )
-                if hasattr(packet, "pfcp"):
-                    rows.extend(
-                        ("PFCP", row) for row in pfcp_rows(packet, tracker)
-                    )
+        with materialized_capture(pcap) as capture_path:
+            capture = pyshark.FileCapture(
+                str(capture_path),
+                display_filter=display_filter,
+                keep_packets=False,
+            )
+            try:
+                for packet in capture:
+                    rows: list[tuple[str, dict[str, str]]] = []
+                    if hasattr(packet, "ngap"):
+                        rows.extend(
+                            ("NGAP", row) for row in ngap_rows(packet, tracker)
+                        )
+                    if hasattr(packet, "http2"):
+                        rows.extend(
+                            ("SBI", row) for row in http2_rows(packet, tracker)
+                        )
+                    if hasattr(packet, "pfcp"):
+                        rows.extend(
+                            ("PFCP", row) for row in pfcp_rows(packet, tracker)
+                        )
 
-                for protocol, row in rows:
-                    writer.writerow(row)
-                    counts[protocol] += 1
-        finally:
-            capture.close()
+                    for protocol, row in rows:
+                        writer.writerow(row)
+                        counts[protocol] += 1
+            finally:
+                capture.close()
 
     return counts
 
