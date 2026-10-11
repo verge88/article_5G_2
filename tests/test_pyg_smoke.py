@@ -11,6 +11,7 @@ from fedsiggraph.data.index import LocalNodeIndex
 from fedsiggraph.data.pyg import to_temporal_data
 from fedsiggraph.data.schema import CanonicalEvent
 from fedsiggraph.data.vocab import SemanticVocabularies
+from fedsiggraph.models.continuation import continuation_nll
 from fedsiggraph.models.semantic_tgn import SemanticCausalTGN
 from fedsiggraph.models.temporal_heat import TemporalHEAT
 
@@ -20,6 +21,7 @@ def event(
     timestamp_ns: int,
     *,
     procedure: str = "CreateSMContext",
+    protocol: str = "SBI",
 ) -> CanonicalEvent:
     return CanonicalEvent(
         event_id=event_id,
@@ -31,11 +33,12 @@ def event(
         dst_type="NF",
         src_role="AMF",
         dst_role="SMF",
-        protocol="SBI",
-        relation="Nsmf_PDUSession",
+        protocol=protocol,
+        relation=f"{protocol}::REL",
         procedure=procedure,
         message_type="HTTP2_REQUEST",
         direction="REQUEST",
+        session_context="session-1",
         packet_length=256,
         label=0,
     )
@@ -44,7 +47,12 @@ def event(
 def build_toy_data():
     events = [
         event(1, 1_000_000),
-        event(2, 2_000_000, procedure="UpdateSMContext"),
+        event(
+            2,
+            2_000_000,
+            procedure="Session Establishment",
+            protocol="PFCP",
+        ),
     ]
     vocab = SemanticVocabularies.fit(events)
     node_index = LocalNodeIndex.fit(events)
@@ -78,6 +86,8 @@ def test_temporal_data_and_tgn_baseline_construct():
     assert data.msg.shape == (2, 4)
     assert data.procedure_id.shape == (2,)
     assert data.t.tolist() == [0, 1000]
+    assert data.context_history_mask.tolist() == [False, True]
+    assert data.cross_protocol_mask.tolist() == [False, True]
 
     model = CausalTGNBaseline(
         num_nodes=data.num_nodes,
@@ -95,13 +105,17 @@ def test_temporal_data_and_tgn_baseline_construct():
 
 def test_temporal_loader_preserves_semantic_attributes():
     data, vocab, _ = build_toy_data()
-    batch = next(iter(TemporalDataLoader(data, batch_size=1)))
+    batches = list(TemporalDataLoader(data, batch_size=1))
+    first, second = batches
 
-    assert batch.protocol_id.shape == (1,)
-    assert batch.relation_id.shape == (1,)
-    assert batch.procedure_id.shape == (1,)
-    assert batch.src_role_id.shape == (1,)
-    assert batch.dst_role_id.shape == (1,)
+    assert first.protocol_id.shape == (1,)
+    assert first.relation_id.shape == (1,)
+    assert first.procedure_id.shape == (1,)
+    assert first.src_role_id.shape == (1,)
+    assert first.dst_role_id.shape == (1,)
+    assert not bool(first.context_history_mask.item())
+    assert bool(second.context_history_mask.item())
+    assert bool(second.cross_protocol_mask.item())
 
     model = SemanticCausalTGN(
         num_nodes=data.num_nodes,
@@ -112,7 +126,7 @@ def test_temporal_loader_preserves_semantic_attributes():
         time_dim=16,
         embedding_dim=16,
     )
-    encoded = model.encode_batch(batch)
+    encoded = model.encode_batch(first)
     assert encoded.shape == (1, 16)
 
     logits = model.score_embeddings(
@@ -123,7 +137,7 @@ def test_temporal_loader_preserves_semantic_attributes():
     assert logits.shape == (1, 1)
 
 
-def test_temporal_heat_accepts_node_relation_and_edge_features():
+def test_temporal_heat_accepts_node_relation_edge_and_continuation_features():
     data, vocab, node_index = build_toy_data()
     model = TemporalHEAT(
         num_nodes=data.num_nodes,
@@ -156,3 +170,21 @@ def test_temporal_heat_accepts_node_relation_and_edge_features():
         edge_type,
     )
     assert out.shape == (2, 16)
+
+    second = list(TemporalDataLoader(data, batch_size=1))[1]
+    protocol_logits, procedure_logits = model.continuation_logits(
+        torch.zeros((1, 16)),
+        torch.zeros((1, 16)),
+        second,
+    )
+    assert protocol_logits.shape == (1, len(vocab.protocol))
+    assert procedure_logits.shape == (1, len(vocab.procedure))
+
+    nll = continuation_nll(
+        protocol_logits,
+        procedure_logits,
+        protocol_target=second.protocol_id,
+        procedure_target=second.procedure_id,
+    )
+    assert nll.shape == (1,)
+    assert torch.isfinite(nll).all()
