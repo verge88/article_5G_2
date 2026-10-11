@@ -49,6 +49,11 @@ jobs:
               assert manifest["counts"]["calibration"] > 0
               assert manifest["counts"]["test"] > 0
               assert manifest["time_unit_ns"] == 1000
+              assert manifest["claim_eligibility"]["temporal_topology"] is True
+              assert (
+                  manifest["claim_eligibility"]["cross_protocol_continuation"]
+                  is False
+              )
               assert (root / "train.pt").exists()
               assert (root / "test_metadata.csv").exists()
               print(name, json.dumps({
@@ -56,6 +61,7 @@ jobs:
                   "context_coverage": manifest["context_coverage"],
                   "test_unknown_rates": manifest["test_unknown_rates"],
                   "test_history_mode": manifest["test_history_mode"],
+                  "claim_eligibility": manifest["claim_eligibility"],
               }, sort_keys=True))
           PY
       - name: Upload real-data manifests
