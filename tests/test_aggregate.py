@@ -45,6 +45,7 @@ def test_aggregate_results_includes_cross_protocol_scope_and_score_ablation():
                 }
             },
             "score_ablation": {
+                "memory_trajectory": "independent_causal_replay",
                 "base": {
                     "metrics": {"pr_auc": 0.60},
                     "cross_protocol": {
@@ -74,6 +75,7 @@ def test_aggregate_results_includes_cross_protocol_scope_and_score_ablation():
                 }
             },
             "score_ablation": {
+                "memory_trajectory": "independent_causal_replay",
                 "base": {
                     "metrics": {"pr_auc": 0.62},
                     "cross_protocol": {
