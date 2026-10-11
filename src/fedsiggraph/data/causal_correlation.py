@@ -66,7 +66,10 @@ class CausalCorrelationTracker:
         for kind in kinds:
             value = _clean(values.get(kind))
             if value is not None:
-                yield kind, value
+                # PFCP exposes the same logical SEID through several fields
+                # depending on message direction and F-SEID representation.
+                alias_kind = "seid" if kind.startswith("seid") else kind
+                yield alias_kind, value
 
     def _merge_ue_keys(self, keep: str, remove: str) -> None:
         if keep == remove:
