@@ -56,12 +56,30 @@ def split_benign_development(
         raise ValueError("development capture contains attack-labelled events")
 
     n = len(benign)
-    train_end = max(1, int(n * train_fraction))
-    val_end = max(train_end, int(n * (train_fraction + val_fraction)))
 
-    # Keep at least one calibration event.
+    def advance_past_timestamp_group(index: int) -> int:
+        """Keep equal-timestamp events in the same development partition."""
+        index = max(1, min(index, n - 1))
+        while (
+            index < n
+            and benign[index - 1].timestamp_ns == benign[index].timestamp_ns
+        ):
+            index += 1
+        return index
+
+    train_end = advance_past_timestamp_group(int(n * train_fraction))
+    val_end = advance_past_timestamp_group(
+        int(n * (train_fraction + val_fraction))
+    )
+
+    if val_end <= train_end:
+        val_end = advance_past_timestamp_group(train_end + 1)
+
+    # Keep at least one calibration timestamp-group.
     if val_end >= n:
-        val_end = n - 1
+        raise ValueError(
+            "timestamp groups are too large for non-empty train/val/calibration splits"
+        )
 
     splits = EventSplits(
         train=tuple(benign[:train_end]),
