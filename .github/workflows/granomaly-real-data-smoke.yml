@@ -1,0 +1,70 @@
+name: granomaly-real-data-smoke
+
+on:
+  push:
+    branches: ["feat/fedsiggraph-v1"]
+    paths:
+      - ".github/workflows/granomaly-real-data-smoke.yml"
+  workflow_dispatch:
+
+jobs:
+  prepare-real-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install project and PyG
+        run: pip install -e ".[dev]" torch-geometric scikit-learn
+      - name: Fetch pinned Granomaly captures
+        run: python scripts/fetch_granomaly.py --output data/raw/granomaly
+      - name: Prepare NRF experiment
+        run: |
+          python scripts/prepare_granomaly.py \
+            --normal data/raw/granomaly/bridge_normal.csv \
+            --attack data/raw/granomaly/bridge_attack_nrf.csv \
+            --output data/prepared/granomaly-nrf
+      - name: Prepare SMF experiment
+        run: |
+          python scripts/prepare_granomaly.py \
+            --normal data/raw/granomaly/bridge_normal.csv \
+            --attack data/raw/granomaly/bridge_attack_smf.csv \
+            --output data/prepared/granomaly-smf
+      - name: Validate real-data manifests
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          for name in ("granomaly-nrf", "granomaly-smf"):
+              root = Path("data/prepared") / name
+              manifest = json.loads((root / "manifest.json").read_text())
+              assert manifest["counts"]["train"] > 0
+              assert manifest["counts"]["calibration"] > 0
+              assert manifest["counts"]["test"] > 0
+              assert manifest["time_unit_ns"] == 1000
+              assert (root / "train.pt").exists()
+              assert (root / "test_metadata.csv").exists()
+              print(name, json.dumps({
+                  "counts": manifest["counts"],
+                  "context_coverage": manifest["context_coverage"],
+                  "test_unknown_rates": manifest["test_unknown_rates"],
+                  "test_history_mode": manifest["test_history_mode"],
+              }, sort_keys=True))
+          PY
+      - name: Upload real-data manifests
+        uses: actions/upload-artifact@v4
+        with:
+          name: granomaly-real-data-manifests
+          path: |
+            data/raw/granomaly/source_manifest.json
+            data/prepared/granomaly-nrf/manifest.json
+            data/prepared/granomaly-nrf/preprocessing.json
+            data/prepared/granomaly-smf/manifest.json
+            data/prepared/granomaly-smf/preprocessing.json
