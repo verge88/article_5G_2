@@ -53,6 +53,8 @@ _PFCP_PROCEDURES = (
     "SeesionMangementRequest",  # spelling present in upstream parser
     "SessionDeletionRequest",
     "SessionDeletionResponse",
+    "SessionReportRequest",
+    "SessionReportResponse",
     "Heartbeat",
 )
 
