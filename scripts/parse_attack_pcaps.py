@@ -90,6 +90,28 @@ def ensure_parser(
         )
 
 
+def materialize_capture(
+    pcap: Path,
+    output_dir: Path,
+    *,
+    dry_run: bool,
+) -> tuple[Path, Path | None]:
+    if pcap.suffix != ".gz":
+        return pcap, None
+
+    temporary_root = output_dir / ".decompressed"
+    temporary_root.mkdir(parents=True, exist_ok=True)
+    temporary_pcap = temporary_root / pcap.stem
+    if dry_run:
+        print(f"plan gunzip {pcap} -> {temporary_pcap}")
+    else:
+        with gzip.open(pcap, "rb") as src, open(
+            temporary_pcap, "wb"
+        ) as dst:
+            shutil.copyfileobj(src, dst)
+    return temporary_pcap, temporary_pcap
+
+
 def main() -> None:
     args = parse_args()
     pcap_dir = Path(args.pcap_dir)
@@ -117,24 +139,14 @@ def main() -> None:
     }
 
     for pcap in pcaps:
-        source_pcap = pcap
-        temporary_pcap: Path | None = None
-
-        if pcap.suffix == ".gz":
-            # Zenodo ORIGAMI distributes its small example capture as
-            # example.pcap.gz. PyShark expects a capture file, so materialize a
-            # temporary decompressed copy and remove it after parsing.
-            temporary_root = output_dir / ".decompressed"
-            temporary_root.mkdir(parents=True, exist_ok=True)
-            temporary_pcap = temporary_root / pcap.stem
-            if args.dry_run:
-                print(f"plan gunzip {pcap} -> {temporary_pcap}")
-            else:
-                with gzip.open(pcap, "rb") as src, open(
-                    temporary_pcap, "wb"
-                ) as dst:
-                    shutil.copyfileobj(src, dst)
-            source_pcap = temporary_pcap
+        # Zenodo ORIGAMI distributes its example capture as .pcap.gz.
+        # PyShark expects a capture file, so compressed inputs are materialized
+        # only for the duration of parsing.
+        source_pcap, temporary_pcap = materialize_capture(
+            pcap,
+            output_dir,
+            dry_run=args.dry_run,
+        )
 
         capture_name = source_pcap.stem
         capture_out = output_dir / capture_name
