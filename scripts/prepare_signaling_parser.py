@@ -7,6 +7,7 @@ import argparse
 import csv
 import hashlib
 import json
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from fedsiggraph.data import SignalingParserAdapter, fit_preprocessing
@@ -29,6 +30,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--benign-pattern", default="*_m_stats.csv")
     parser.add_argument("--test-pattern", default="*_m_stats.csv")
     parser.add_argument("--test-label", type=int, choices=[0, 1], default=None)
+    parser.add_argument(
+        "--attack-window",
+        nargs=2,
+        metavar=("START_SECONDS", "END_SECONDS"),
+        help=(
+            "Label only events inside this inclusive source-time interval as "
+            "attack; events outside are benign. Cannot be combined with "
+            "--test-label."
+        ),
+    )
     parser.add_argument("--attack-type")
     parser.add_argument("--train-fraction", type=float, default=0.70)
     parser.add_argument("--val-fraction", type=float, default=0.15)
@@ -79,6 +90,35 @@ def source_inventory(
             "sha256": sha256(path),
         }
         for path in paths
+    ]
+
+
+def seconds_to_ns(value: str) -> int:
+    try:
+        return int(Decimal(str(value)) * Decimal("1000000000"))
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ValueError(f"invalid attack-window time: {value!r}") from exc
+
+
+def apply_attack_window(
+    events,
+    *,
+    start_ns: int,
+    end_ns: int,
+    attack_type: str | None,
+):
+    if end_ns < start_ns:
+        raise ValueError("attack-window end must be >= start")
+    return [
+        event.synthetic(
+            label=1 if start_ns <= event.timestamp_ns <= end_ns else 0,
+            attack_type=(
+                attack_type
+                if start_ns <= event.timestamp_ns <= end_ns
+                else None
+            ),
+        )
+        for event in events
     ]
 
 
@@ -135,14 +175,29 @@ def main() -> None:
         label=0,
         attack_type=None,
     )
+    if args.attack_window is not None and args.test_label is not None:
+        raise ValueError("--attack-window cannot be combined with --test-label")
+
     test_events = load_events(
         adapter,
         csv_path=args.test_csv,
         directory=args.test_dir,
         pattern=args.test_pattern,
-        label=args.test_label,
-        attack_type=args.attack_type,
+        label=(0 if args.attack_window is not None else args.test_label),
+        attack_type=(
+            None if args.attack_window is not None else args.attack_type
+        ),
     )
+    if args.attack_window is not None:
+        start_ns, end_ns = (
+            seconds_to_ns(value) for value in args.attack_window
+        )
+        test_events = apply_attack_window(
+            test_events,
+            start_ns=start_ns,
+            end_ns=end_ns,
+            attack_type=args.attack_type,
+        )
 
     fitted = fit_preprocessing(
         benign_events,
@@ -279,6 +334,20 @@ def main() -> None:
         },
         "test_history_mode": "continuous" if test_is_contiguous else "reset",
         "test_history_mode_requested": args.test_history_mode,
+        "test_label_policy": (
+            {
+                "mode": "attack_window",
+                "start_seconds": args.attack_window[0],
+                "end_seconds": args.attack_window[1],
+                "attack_type": args.attack_type,
+            }
+            if args.attack_window is not None
+            else {
+                "mode": "uniform",
+                "label": args.test_label,
+                "attack_type": args.attack_type,
+            }
+        ),
         "context_coverage": context_coverage,
         "claim_eligibility": research_claim_eligibility(context_coverage),
         "explicit_context_counts": {
