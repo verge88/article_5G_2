@@ -88,6 +88,13 @@ def test_temporal_data_and_tgn_baseline_construct():
     assert data.t.tolist() == [0, 1000]
     assert data.context_history_mask.tolist() == [False, True]
     assert data.cross_protocol_mask.tolist() == [False, True]
+    assert data.context_protocol_history_id.shape == (2, 4)
+    assert data.context_relation_history_id.shape == (2, 4)
+    assert data.context_procedure_history_id.shape == (2, 4)
+    assert data.context_sequence_mask.tolist() == [
+        [False, False, False, False],
+        [True, False, False, False],
+    ]
 
     model = CausalTGNBaseline(
         num_nodes=data.num_nodes,
@@ -116,6 +123,8 @@ def test_temporal_loader_preserves_semantic_attributes():
     assert not bool(first.context_history_mask.item())
     assert bool(second.context_history_mask.item())
     assert bool(second.cross_protocol_mask.item())
+    assert second.context_protocol_history_id.shape == (1, 4)
+    assert second.context_sequence_mask.shape == (1, 4)
 
     model = SemanticCausalTGN(
         num_nodes=data.num_nodes,
@@ -188,3 +197,30 @@ def test_temporal_heat_accepts_node_relation_edge_and_continuation_features():
     )
     assert nll.shape == (1,)
     assert torch.isfinite(nll).all()
+
+
+    immediate_model = TemporalHEAT(
+        num_nodes=data.num_nodes,
+        numeric_dim=data.msg.size(-1),
+        vocab_sizes=vocab_sizes(vocab),
+        num_node_types=node_index.num_node_types,
+        num_edge_types=len(vocab.relation),
+        event_dim=16,
+        memory_dim=16,
+        time_dim=8,
+        embedding_dim=16,
+        heads=4,
+        continuation_history_mode="immediate",
+    )
+    assert model.continuation_head.history_mode == "sequence"
+    assert immediate_model.continuation_head.history_mode == "immediate"
+
+    immediate_protocol, immediate_procedure = (
+        immediate_model.continuation_logits(
+            torch.zeros((1, 16)),
+            torch.zeros((1, 16)),
+            second,
+        )
+    )
+    assert immediate_protocol.shape == protocol_logits.shape
+    assert immediate_procedure.shape == procedure_logits.shape
