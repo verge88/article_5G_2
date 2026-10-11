@@ -48,9 +48,10 @@ def node_unknown_rate(events, node_index) -> float:
         identities.extend([event.src_entity, event.dst_entity])
     if not identities:
         return 0.0
-    return sum(node_index.encode(item) == node_index.unk_id for item in identities) / len(
-        identities
-    )
+    return sum(
+        node_index.encode(item) == node_index.unk_id
+        for item in identities
+    ) / len(identities)
 
 
 def main() -> None:
@@ -149,12 +150,18 @@ def main() -> None:
             "direction": fitted.vocab.direction.token_to_id,
         },
         "node_index": fitted.node_index.entity_to_id,
+        "node_type_by_id": list(fitted.node_index.node_type_by_id),
+        "role_by_id": list(fitted.node_index.role_by_id),
+        "node_type_ids": fitted.node_index.node_type_ids(),
+        "num_node_types": fitted.node_index.num_node_types,
         "numeric_median": fitted.numeric_encoder.stats.median.tolist(),
         "numeric_scale": fitted.numeric_encoder.stats.scale.tolist(),
         "time_origin_ns": fitted.time_origin_ns,
         "test_time_origin_ns": test_origin_ns,
     }
-    with open(output_dir / "preprocessing.json", "w", encoding="utf-8") as handle:
+    with open(
+        output_dir / "preprocessing.json", "w", encoding="utf-8"
+    ) as handle:
         json.dump(preprocessing, handle, indent=2, sort_keys=True)
 
     manifest = {
@@ -166,16 +173,23 @@ def main() -> None:
             "test": len(splits.test),
         },
         "num_train_nodes_including_unk": fitted.node_index.num_nodes,
-        "test_history_mode": "continuous" if test_is_contiguous else "reset",
+        "num_node_types": fitted.node_index.num_node_types,
+        "test_history_mode": (
+            "continuous" if test_is_contiguous else "reset"
+        ),
         "test_unknown_rates": {
-            "node_identity": node_unknown_rate(splits.test, fitted.node_index),
+            "node_identity": node_unknown_rate(
+                splits.test, fitted.node_index
+            ),
             "protocol": unknown_rate(test_protocol_ids),
             "procedure": unknown_rate(test_procedure_ids),
             "dst_role": unknown_rate(test_dst_role_ids),
         },
         "time_unit": "microseconds",
     }
-    with open(output_dir / "manifest.json", "w", encoding="utf-8") as handle:
+    with open(
+        output_dir / "manifest.json", "w", encoding="utf-8"
+    ) as handle:
         json.dump(manifest, handle, indent=2, sort_keys=True)
 
     print(json.dumps(manifest, indent=2, sort_keys=True))
