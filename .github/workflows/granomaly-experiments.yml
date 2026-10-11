@@ -1,0 +1,133 @@
+name: granomaly-experiments
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Seed profile
+        required: true
+        type: choice
+        default: quick
+        options:
+          - quick
+          - standard
+          - robust
+      epochs:
+        description: Training epochs per model/seed
+        required: true
+        default: "5"
+      experiments:
+        description: Granomaly attack experiments
+        required: true
+        type: choice
+        default: both
+        options:
+          - both
+          - nrf
+          - smf
+      test_memory:
+        description: Test-time memory policy
+        required: true
+        type: choice
+        default: safe
+        options:
+          - frozen
+          - safe
+          - blind
+
+jobs:
+  ablation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install CPU PyTorch
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install FedSigGraph ML dependencies
+        run: pip install -e ".[ml,dev]"
+
+      - name: Resolve experiment matrix
+        id: matrix
+        shell: bash
+        run: |
+          case "${{ inputs.profile }}" in
+            quick)    echo "seeds=1" >> "$GITHUB_OUTPUT" ;;
+            standard) echo "seeds=1 2 3" >> "$GITHUB_OUTPUT" ;;
+            robust)   echo "seeds=1 2 3 4 5" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+          case "${{ inputs.experiments }}" in
+            both) echo "experiments=nrf smf" >> "$GITHUB_OUTPUT" ;;
+            nrf)  echo "experiments=nrf" >> "$GITHUB_OUTPUT" ;;
+            smf)  echo "experiments=smf" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Run Granomaly NRF/SMF suite
+        shell: bash
+        run: |
+          read -ra SEEDS <<< "${{ steps.matrix.outputs.seeds }}"
+          read -ra EXPERIMENTS <<< "${{ steps.matrix.outputs.experiments }}"
+
+          python scripts/run_granomaly_suite.py \
+            --workspace experiments/granomaly \
+            --experiments "${EXPERIMENTS[@]}" \
+            --seeds "${SEEDS[@]}" \
+            --epochs "${{ inputs.epochs }}" \
+            --test-memory "${{ inputs.test_memory }}"
+
+      - name: Write run summary
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f experiments/granomaly/suite_summary.json ]]; then
+            python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+
+          payload = json.loads(
+              Path("experiments/granomaly/suite_summary.json").read_text()
+          )
+          print("# FedSigGraph Granomaly experiment")
+          print()
+          print(f"- seeds: {payload.get('seeds')}")
+          print(f"- epochs: {payload.get('epochs')}")
+          print(f"- test memory: {payload.get('test_memory')}")
+          print()
+
+          for experiment, result in payload.get("results", {}).items():
+              print(f"## {experiment.upper()}")
+              print()
+              print("| Model | PR-AUC | Recall | FPR |")
+              print("|---|---:|---:|---:|")
+              for model, aggregate in result.get("aggregate", {}).items():
+                  metrics = aggregate.get("metrics", {})
+                  def mean(name):
+                      value = metrics.get(name, {}).get("mean")
+                      return "n/a" if value is None else f"{value:.4f}"
+                  print(
+                      f"| {model} | {mean('pr_auc')} | "
+                      f"{mean('recall')} | {mean('false_positive_rate')} |"
+                  )
+              print()
+          PY
+          else
+            echo "No suite_summary.json was produced." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload experiment outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: granomaly-${{ inputs.experiments }}-${{ inputs.profile }}-${{ inputs.test_memory }}
+          path: experiments/granomaly/
+          if-no-files-found: warn
+          retention-days: 30
