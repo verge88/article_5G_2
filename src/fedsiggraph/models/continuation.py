@@ -5,13 +5,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 try:
+    import torch
     from torch import Tensor, nn
+    import torch.nn.functional as F
 except ImportError as exc:  # pragma: no cover
     raise ImportError("continuation head requires the ML extra") from exc
 
 
 class ContextContinuationHead(nn.Module):
-    """Predict the *current* protocol/procedure from only previous context.
+    """Predict the current protocol/procedure from only previous context.
 
     The current event embedding is intentionally absent from this head. Inputs
     are pre-event node embeddings plus categorical IDs from the immediately
@@ -58,7 +60,7 @@ class ContextContinuationHead(nn.Module):
         prev_procedure_id: Tensor,
     ) -> tuple[Tensor, Tensor]:
         hidden = self.trunk(
-            __import__("torch").cat(
+            torch.cat(
                 [
                     z_src,
                     z_dst,
@@ -70,3 +72,24 @@ class ContextContinuationHead(nn.Module):
             )
         )
         return self.protocol_out(hidden), self.procedure_out(hidden)
+
+
+def continuation_nll(
+    protocol_logits: Tensor,
+    procedure_logits: Tensor,
+    *,
+    protocol_target: Tensor,
+    procedure_target: Tensor,
+) -> Tensor:
+    """Return an un-reduced joint continuation surprise per event."""
+    protocol_loss = F.cross_entropy(
+        protocol_logits,
+        protocol_target,
+        reduction="none",
+    )
+    procedure_loss = F.cross_entropy(
+        procedure_logits,
+        procedure_target,
+        reduction="none",
+    )
+    return 0.5 * (protocol_loss + procedure_loss)
