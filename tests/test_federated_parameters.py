@@ -3,7 +3,11 @@ import pytest
 torch = pytest.importorskip("torch")
 from torch import nn
 
-from fedsiggraph.federated.aggregation import weighted_average
+from fedsiggraph.federated.aggregation import (
+    coordinate_median,
+    trimmed_mean,
+    weighted_average,
+)
 from fedsiggraph.federated.parameters import (
     extract_shared_parameters,
     load_shared_parameters,
@@ -104,3 +108,18 @@ def test_temporal_heat_private_adapter_is_not_shared():
         name.startswith("local_adapter.")
         for name, _ in model.named_parameters()
     )
+
+
+
+def test_robust_aggregation_rejects_extreme_client():
+    clients = [
+        ({"w": torch.tensor([0.0])}, 10),
+        ({"w": torch.tensor([1.0])}, 10),
+        ({"w": torch.tensor([1000.0])}, 10),
+    ]
+
+    median = coordinate_median(clients)
+    trimmed = trimmed_mean(clients, trim_ratio=0.34)
+
+    assert median["w"].item() == pytest.approx(1.0)
+    assert trimmed["w"].item() == pytest.approx(1.0)
