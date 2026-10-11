@@ -177,3 +177,66 @@ personalized federation
 ```
 
 That staged design makes it possible to attribute gains to representation, negative construction, heterogeneous graph modeling, and federation separately.
+
+
+## Staged ablation
+
+Run the full five-stage comparison with identical seeds and evaluation:
+
+```bash
+python scripts/run_ablation.py \
+  --data data/granomaly-smf \
+  --output-dir results/granomaly-smf \
+  --seeds 1 2 3 \
+  --epochs 20 \
+  --test-memory safe
+```
+
+The launcher evaluates:
+
+```text
+numeric_tgn
+semantic_tgn
+temporal_heat
+temporal_heat_aux
+temporal_heat_continuation
+```
+
+where the last three isolate heterogeneous aggregation, auxiliary continuation
+training, and continuation surprise in the final anomaly score. Individual
+seed JSON files are retained and `summary.json` reports mean/std overall and
+per attack family.
+
+### Context coverage is a dataset validity check
+
+`manifest.json` reports, for each split:
+
+```json
+{
+  "context_coverage": {
+    "train": {
+      "explicit_context_history": 0.0,
+      "cross_protocol_transition": 0.0
+    }
+  }
+}
+```
+
+These values are not model metrics. They describe whether the source capture
+contains enough explicit UE/session correlation to evaluate the continuation
+hypothesis. Cross-protocol loss never invents a PFCP↔SBI or NGAP↔SBI session
+link from temporal proximity alone.
+
+If `cross_protocol_transition` is approximately zero, the dataset remains
+valid for topology, semantic-event, hard-negative, and heterogeneous-GNN
+experiments, but it must **not** be used as evidence for the cross-protocol
+contribution. A richer parser/dataset exposing shared UE/PDU-session
+identifiers is required for that experiment.
+
+## Evaluation-only attack metadata
+
+Preparation also writes `test_metadata.csv`. It contains the original attack
+family solely for final reporting. It is excluded from vocabulary fitting,
+numeric scaling, model input, training loss, memory updates, and threshold
+calibration. Trainers verify that its binary labels align exactly with
+`test.pt` before producing per-attack recall.
