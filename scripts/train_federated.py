@@ -30,6 +30,7 @@ from fedsiggraph.training.metadata import load_test_metadata
 from fedsiggraph.training.metrics import (
     attack_type_breakdown,
     calibrate_threshold,
+    evaluate_masked_scores,
     evaluate_scores,
     temporal_duration_ns,
 )
@@ -104,6 +105,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--continuation-loss-weight", type=float, default=0.25)
     parser.add_argument("--continuation-score-weight", type=float, default=1.0)
     parser.add_argument("--cross-protocol-weight", type=float, default=2.0)
+    parser.add_argument(
+        "--continuation-history-mode",
+        choices=["immediate", "sequence"],
+        default="sequence",
+    )
     parser.add_argument("--target-fpr", type=float, default=1e-3)
     parser.add_argument(
         "--test-memory",
@@ -180,6 +186,7 @@ def build_clients(args: argparse.Namespace, device: torch.device) -> list[Client
             cross_protocol_weight=args.cross_protocol_weight,
             device=device,
             local_adapter_dim=args.local_adapter_dim,
+            continuation_history_mode=args.continuation_history_mode,
         )
         states.append(
             ClientState(
@@ -208,7 +215,10 @@ def evaluate_client(
     load_shared_parameters(client.runner.model, global_parameters)
     client.runner.reset_state()
 
-    # Local benign history and calibration remain deployment-private.
+    # Rebuild deployment-local temporal state with the final shared weights.
+    # Carrying state from the last local optimizer step would make evaluation
+    # depend on a stale parameter trajectory.
+    client.runner.score_stream(client.train, observe="always")
     client.runner.score_stream(client.val, observe="always")
     calibration_components = client.runner.score_stream(
         client.calibration,
@@ -282,6 +292,20 @@ def evaluate_client(
                 time_unit_ns=int(client.manifest.get("time_unit_ns", 1_000)),
             ),
         ),
+        "scope_metrics": {
+            "explicit_context": evaluate_masked_scores(
+                test_components.labels,
+                test_scores,
+                threshold,
+                test_components.context_mask,
+            ),
+            "cross_protocol": evaluate_masked_scores(
+                test_components.labels,
+                test_scores,
+                threshold,
+                test_components.cross_protocol_mask,
+            ),
+        },
         "per_attack": attack_type_breakdown(
             metadata.attack_types,
             test_components.labels,
@@ -423,6 +447,7 @@ def main() -> None:
         "seed": args.seed,
         "device": str(device),
         "local_adapter_dim": args.local_adapter_dim,
+        "continuation_history_mode": args.continuation_history_mode,
         "target_fpr": args.target_fpr,
         "poison_clients": sorted(requested_poison),
         "poison_mode": (
