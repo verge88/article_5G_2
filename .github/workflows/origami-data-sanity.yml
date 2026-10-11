@@ -12,6 +12,10 @@ on:
       - "src/fedsiggraph/data/signaling_parser.py"
       - ".github/workflows/origami-data-sanity.yml"
 
+concurrency:
+  group: origami-data-sanity-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   causal-pcap:
     runs-on: ubuntu-latest
