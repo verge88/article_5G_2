@@ -18,15 +18,21 @@ def parse_args() -> argparse.Namespace:
     benign = parser.add_mutually_exclusive_group(required=True)
     benign.add_argument("--benign-csv")
     benign.add_argument("--benign-dir")
+    benign.add_argument("--benign-pcap")
     test = parser.add_mutually_exclusive_group(required=True)
     test.add_argument("--test-csv")
     test.add_argument("--test-dir")
+    test.add_argument("--test-pcap")
 
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--deployment-id", required=True)
     parser.add_argument("--role-map")
     parser.add_argument("--test-label", type=int, choices=[0, 1], default=None)
     parser.add_argument("--attack-type")
+    parser.add_argument(
+        "--pcap-display-filter",
+        default="http2||ngap||pfcp",
+    )
     parser.add_argument("--seeds", nargs="+", type=int, default=[1, 2, 3])
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=512)
@@ -61,6 +67,42 @@ def main() -> None:
     workspace = Path(args.workspace)
     prepared = workspace / "prepared"
     results = workspace / "results"
+    raw = workspace / "raw"
+
+    benign_csv = args.benign_csv
+    test_csv = args.test_csv
+
+    if args.benign_pcap:
+        benign_csv = str(raw / "benign_correlated.csv")
+        run(
+            [
+                sys.executable,
+                "scripts/export_correlated_pcap.py",
+                "--pcap",
+                args.benign_pcap,
+                "--output",
+                benign_csv,
+                "--display-filter",
+                args.pcap_display_filter,
+            ],
+            dry_run=args.dry_run,
+        )
+
+    if args.test_pcap:
+        test_csv = str(raw / "test_correlated.csv")
+        run(
+            [
+                sys.executable,
+                "scripts/export_correlated_pcap.py",
+                "--pcap",
+                args.test_pcap,
+                "--output",
+                test_csv,
+                "--display-filter",
+                args.pcap_display_filter,
+            ],
+            dry_run=args.dry_run,
+        )
 
     prepare = [
         sys.executable,
@@ -70,12 +112,12 @@ def main() -> None:
         "--deployment-id",
         args.deployment_id,
     ]
-    if args.benign_csv:
-        prepare += ["--benign-csv", args.benign_csv]
+    if benign_csv:
+        prepare += ["--benign-csv", benign_csv]
     else:
         prepare += ["--benign-dir", args.benign_dir]
-    if args.test_csv:
-        prepare += ["--test-csv", args.test_csv]
+    if test_csv:
+        prepare += ["--test-csv", test_csv]
     else:
         prepare += ["--test-dir", args.test_dir]
     if args.role_map:
