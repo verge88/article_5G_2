@@ -28,6 +28,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--deployment-id", required=True)
     parser.add_argument("--role-map")
     parser.add_argument("--test-label", type=int, choices=[0, 1], default=None)
+    parser.add_argument(
+        "--attack-window",
+        nargs=2,
+        metavar=("START_SECONDS", "END_SECONDS"),
+    )
     parser.add_argument("--attack-type")
     parser.add_argument(
         "--pcap-display-filter",
@@ -135,6 +140,8 @@ def main() -> None:
         prepare += ["--role-map", args.role_map]
     if args.test_label is not None:
         prepare += ["--test-label", str(args.test_label)]
+    if args.attack_window is not None:
+        prepare += ["--attack-window", *args.attack_window]
     if args.attack_type:
         prepare += ["--attack-type", args.attack_type]
 
