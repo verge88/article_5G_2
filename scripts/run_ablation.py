@@ -10,6 +10,7 @@ import subprocess
 import sys
 
 from fedsiggraph.evaluation.aggregate import aggregate_results
+from fedsiggraph.evaluation.provenance import runtime_provenance
 
 
 MODEL_CHOICES = (
@@ -166,6 +167,7 @@ def main() -> None:
         "learning_rate": args.lr,
         "target_fpr": args.target_fpr,
         "test_memory": args.test_memory,
+        "provenance": runtime_provenance(Path(__file__).resolve().parents[1]),
         "aggregate": aggregate_results(results),
     }
     with open(
