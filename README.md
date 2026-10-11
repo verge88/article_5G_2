@@ -605,21 +605,22 @@ A pinned acquisition manifest can be created with:
 ```bash
 python scripts/fetch_cross_protocol_sources.py \
   --output data/raw/cross-protocol \
-  --origami example \
+  --origami pcap \
   --dlteam-fuzz
 ```
 
 This downloads:
 
-- ORIGAMI Zenodo record `19605370` example signaling CSV/PCAP;
+- ORIGAMI Zenodo record `19605370` example raw signaling PCAP (compressed);
 - Open5GS fuzzing PCAPs from
   `DLTeamTUC/5GDatasets@e71267ca84f6f38ab39f830a2c515555bb5f5898`.
 
 Every downloaded file is hashed into `source_manifest.json`; ORIGAMI files
 are additionally checked against the MD5 values published by Zenodo.
 
-The DLTeamTUC PCAPs can then be converted with the exact upstream signaling
-parser revision used by the project:
+Both the ORIGAMI benign PCAP and DLTeamTUC attack PCAPs can be converted with
+the exact upstream signaling parser revision used by the project. Compressed
+`.pcap.gz` inputs are materialized temporarily and removed after parsing:
 
 ```bash
 python scripts/parse_attack_pcaps.py \
