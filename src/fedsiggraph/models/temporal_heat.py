@@ -134,6 +134,7 @@ class TemporalHEAT(nn.Module):
         embedding_dim: int = 128,
         heads: int = 4,
         continuation_hidden_dim: int = 128,
+        continuation_history_mode: str = "sequence",
         local_adapter_dim: int = 0,
     ) -> None:
         super().__init__()
@@ -169,6 +170,7 @@ class TemporalHEAT(nn.Module):
             node_dim=embedding_dim,
             vocab_sizes=vocab_sizes,
             hidden_dim=continuation_hidden_dim,
+            history_mode=continuation_history_mode,
         )
 
     def reset_state(self) -> None:
@@ -221,6 +223,16 @@ class TemporalHEAT(nn.Module):
             prev_protocol_id=batch.prev_protocol_id,
             prev_relation_id=batch.prev_relation_id,
             prev_procedure_id=batch.prev_procedure_id,
+            protocol_history_id=getattr(
+                batch, "context_protocol_history_id", None
+            ),
+            relation_history_id=getattr(
+                batch, "context_relation_history_id", None
+            ),
+            procedure_history_id=getattr(
+                batch, "context_procedure_history_id", None
+            ),
+            sequence_mask=getattr(batch, "context_sequence_mask", None),
         )
 
     def observe(
