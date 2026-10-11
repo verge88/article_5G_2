@@ -262,6 +262,11 @@ def main() -> None:
         losses.append(loss)
         print(f"epoch={epoch:03d} loss={loss:.6f}")
 
+    # Rebuild evaluation memory once with the final frozen weights.
+    # Carrying memory from the last training epoch would encode an optimizer
+    # trajectory in which parameters changed while events were observed.
+    runner.reset_state()
+    runner.score_stream(train, observe="always")
     runner.score_stream(val, observe="always")
     calibration_scores, calibration_labels = runner.score_stream(
         calibration,
