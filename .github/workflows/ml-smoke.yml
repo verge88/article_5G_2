@@ -40,3 +40,4 @@ jobs:
           python scripts/run_cross_protocol_suite.py --help
           python scripts/fetch_cross_protocol_sources.py --help
           python scripts/parse_attack_pcaps.py --help
+          python scripts/inspect_signaling_source.py --help
