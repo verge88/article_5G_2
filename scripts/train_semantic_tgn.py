@@ -139,7 +139,7 @@ class SemanticRunner:
         self,
         data,
         batch_size: int,
-    ) -> tuple[float, float]:
+    ) -> tuple[float, float, float]:
         self.model.train()
         self.reset_state()
         loader = TemporalDataLoader(data, batch_size=batch_size)
