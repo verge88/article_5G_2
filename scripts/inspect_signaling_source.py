@@ -62,6 +62,15 @@ def main() -> None:
     context_history = int(transitions.history_mask.sum())
     cross_protocol = int(transitions.cross_protocol_mask.sum())
 
+    transition_pairs = Counter()
+    for index, event in enumerate(events):
+        if not bool(transitions.cross_protocol_mask[index]):
+            continue
+        previous = vocab.protocol.decode(
+            int(transitions.prev_protocol_id[index])
+        )
+        transition_pairs[f"{previous}->{event.protocol}"] += 1
+
     result = {
         "source_files": source_files,
         "inferred_roles": inferred_roles,
@@ -83,6 +92,9 @@ def main() -> None:
         ),
         "explicit_context_history_events": context_history,
         "cross_protocol_transition_events": cross_protocol,
+        "cross_protocol_transition_pairs": dict(
+            sorted(transition_pairs.items())
+        ),
         "explicit_context_history_fraction": context_history / event_count,
         "cross_protocol_transition_fraction": cross_protocol / event_count,
         "unknown_src_role_fraction": (
