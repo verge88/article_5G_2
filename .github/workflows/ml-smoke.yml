@@ -29,6 +29,7 @@ jobs:
           tests/test_federated_poisoning.py
           tests/test_signaling_prepare_smoke.py
           tests/test_scoped_metrics.py
+          tests/test_continuation_sequence.py
           -q
       - name: Check federated experiment CLIs
         run: |
