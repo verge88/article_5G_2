@@ -99,6 +99,11 @@ def trimmed_mean(
     reference_keys, _ = _validate_updates(updates)
     n_clients = len(updates)
     trim = int(n_clients * trim_ratio)
+    if trim_ratio > 0 and trim == 0:
+        raise ValueError(
+            "trim_ratio has no effect for this number of clients; "
+            "increase the ratio or add more clients"
+        )
     if 2 * trim >= n_clients:
         raise ValueError("trim_ratio removes all client updates")
 
