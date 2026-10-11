@@ -23,6 +23,7 @@ from .schema import CanonicalEvent
 
 _REQUIRED_COLUMNS = {"time", "src", "dst", "message", "ue"}
 _SESSION_COLUMNS = (
+    "session_context",
     "pdu_session_id",
     "pduid",
     "sm_context",
