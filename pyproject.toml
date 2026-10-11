@@ -17,6 +17,7 @@ dependencies = [
 ml = [
   "torch>=2.2",
   "torch-geometric>=2.8",
+  "scikit-learn>=1.5",
 ]
 dev = [
   "pytest>=8.0",
