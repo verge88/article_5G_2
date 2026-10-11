@@ -15,6 +15,7 @@ except ImportError as exc:  # pragma: no cover
         "TemporalHEAT requires `pip install -e '.[ml]'`"
     ) from exc
 
+from .continuation import ContextContinuationHead
 from .semantic_tgn import SemanticAnomalyHead, SemanticEventEncoder
 
 
@@ -116,6 +117,7 @@ class TemporalHEAT(nn.Module):
         time_dim: int = 32,
         embedding_dim: int = 128,
         heads: int = 4,
+        continuation_hidden_dim: int = 128,
     ) -> None:
         super().__init__()
         self.event_encoder = SemanticEventEncoder(
@@ -141,6 +143,11 @@ class TemporalHEAT(nn.Module):
             heads=heads,
         )
         self.head = SemanticAnomalyHead(embedding_dim, event_dim)
+        self.continuation_head = ContextContinuationHead(
+            node_dim=embedding_dim,
+            vocab_sizes=vocab_sizes,
+            hidden_dim=continuation_hidden_dim,
+        )
 
     def reset_state(self) -> None:
         self.memory.reset_state()
@@ -177,6 +184,21 @@ class TemporalHEAT(nn.Module):
         event_embedding: Tensor,
     ) -> Tensor:
         return self.head(z_src, z_dst, event_embedding)
+
+    def continuation_logits(
+        self,
+        z_src: Tensor,
+        z_dst: Tensor,
+        batch,
+    ) -> tuple[Tensor, Tensor]:
+        """Predict current semantics from pre-event state and previous context."""
+        return self.continuation_head(
+            z_src,
+            z_dst,
+            prev_protocol_id=batch.prev_protocol_id,
+            prev_relation_id=batch.prev_relation_id,
+            prev_procedure_id=batch.prev_procedure_id,
+        )
 
     def observe(
         self,
