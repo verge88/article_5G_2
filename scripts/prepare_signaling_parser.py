@@ -160,12 +160,15 @@ def rate(mask) -> float:
     return float(mask.float().mean().item())
 
 
-def coverage(data, *, sbi_protocol_id: int) -> dict[str, float]:
+def coverage(data, *, sbi_protocol_id: int | None) -> dict[str, float]:
     cross = data.cross_protocol_mask
-    sbi_cross = cross & (
-        (data.protocol_id == sbi_protocol_id)
-        | (data.prev_protocol_id == sbi_protocol_id)
-    )
+    if sbi_protocol_id is None:
+        sbi_cross = cross & False
+    else:
+        sbi_cross = cross & (
+            (data.protocol_id == sbi_protocol_id)
+            | (data.prev_protocol_id == sbi_protocol_id)
+        )
     return {
         "explicit_context_history": rate(data.context_history_mask),
         "cross_protocol_transition": rate(cross),
@@ -333,7 +336,7 @@ def main() -> None:
                 }
             )
 
-    sbi_protocol_id = fitted.vocab.protocol.encode("SBI")
+    sbi_protocol_id = fitted.vocab.protocol.token_to_id.get("SBI")
     context_coverage = {
         "train": coverage(train_data, sbi_protocol_id=sbi_protocol_id),
         "val": coverage(val_data, sbi_protocol_id=sbi_protocol_id),
