@@ -134,8 +134,20 @@ def attack_type_breakdown(
     return result
 
 
-def temporal_duration_ns(data) -> int | None:
+def temporal_duration_ns(
+    data,
+    *,
+    time_unit_ns: int,
+) -> int | None:
+    """Return stream duration using dataset-level time-unit metadata.
+
+    The time unit belongs to the prepared dataset manifest rather than
+    TemporalData, because TemporalDataLoader slices every custom attribute as
+    event-aligned data.
+    """
+    if time_unit_ns <= 0:
+        raise ValueError("time_unit_ns must be positive")
     if int(data.num_events) <= 1:
         return None
     duration_units = int(data.t.max()) - int(data.t.min())
-    return duration_units * int(data.time_unit_ns)
+    return duration_units * int(time_unit_ns)
