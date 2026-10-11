@@ -34,6 +34,10 @@ def parse_args() -> argparse.Namespace:
         help="Python interpreter with parser dependencies installed.",
     )
     parser.add_argument(
+        "--hosts",
+        help="Optional Wireshark-style hosts file for NF name resolution.",
+    )
+    parser.add_argument(
         "--bootstrap",
         action="store_true",
         help=(
@@ -105,23 +109,30 @@ def main() -> None:
     manifest = {
         "parser_repository": PARSER_REPOSITORY,
         "parser_revision": PARSER_REVISION,
+        "hosts_file": Path(args.hosts).name if args.hosts else None,
         "captures": [],
     }
 
     for pcap in pcaps:
         capture_out = output_dir / pcap.stem
+        bridge = Path(__file__).with_name(
+            "signaling_parser_bridge.py"
+        ).resolve()
         command = [
             args.python,
-            "-m",
-            "dialogparser.main",
-            "-p",
+            str(bridge),
+            "--parser-dir",
+            str(parser_dir.resolve()),
+            "--pcap",
             str(pcap.resolve()),
-            "-d",
+            "--output-dir",
             str(capture_out.resolve()),
         ]
+        if args.hosts:
+            command += ["--hosts", str(Path(args.hosts).resolve())]
         run(
             command,
-            cwd=parser_dir,
+            cwd=None,
             dry_run=args.dry_run,
         )
         manifest["captures"].append(
