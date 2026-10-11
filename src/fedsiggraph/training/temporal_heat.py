@@ -91,6 +91,7 @@ class TemporalHEATRunner:
         cross_protocol_weight: float,
         device: torch.device,
         local_adapter_dim: int = 0,
+        continuation_history_mode: str = "sequence",
     ) -> None:
         if not (0.0 <= token_mask_prob < 1.0):
             raise ValueError("token_mask_prob must be in [0, 1)")
@@ -106,6 +107,7 @@ class TemporalHEATRunner:
         self.token_mask_prob = token_mask_prob
         self.continuation_loss_weight = continuation_loss_weight
         self.cross_protocol_weight = cross_protocol_weight
+        self.continuation_history_mode = continuation_history_mode
 
         node_types = preprocessing["node_type_ids"]
         if len(node_types) != self.num_nodes:
@@ -129,6 +131,7 @@ class TemporalHEATRunner:
             embedding_dim=embedding_dim,
             heads=heads,
             local_adapter_dim=local_adapter_dim,
+            continuation_history_mode=continuation_history_mode,
         ).to(device)
         self.lr = float(lr)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
