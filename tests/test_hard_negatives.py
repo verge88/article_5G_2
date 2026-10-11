@@ -53,5 +53,6 @@ def test_endpoint_negative_changes_role_without_changing_procedure():
 
     assert negative.procedure == "CreateSMContext"
     assert negative.dst_role == "UDM"
-    assert negative.dst_entity.startswith("SYNTHETIC::")
+    # The negative reuses a genuine benign entity, so identity is not a shortcut.
+    assert negative.dst_entity == training[1].dst_entity
     assert negative.label == 1
