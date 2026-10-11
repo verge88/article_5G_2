@@ -65,3 +65,42 @@ def test_weighted_average_uses_example_counts():
     torch.testing.assert_close(
         result["w"], torch.tensor([1.5, 3.5])
     )
+
+
+
+def test_temporal_heat_private_adapter_is_not_shared():
+    pytest.importorskip("torch_geometric")
+    from fedsiggraph.models.temporal_heat import TemporalHEAT
+
+    vocab_sizes = {
+        "src_role": 8,
+        "dst_role": 8,
+        "protocol": 8,
+        "relation": 16,
+        "procedure": 32,
+        "message_type": 8,
+        "direction": 4,
+    }
+    model = TemporalHEAT(
+        num_nodes=4,
+        numeric_dim=3,
+        vocab_sizes=vocab_sizes,
+        num_node_types=4,
+        num_edge_types=vocab_sizes["relation"],
+        event_dim=16,
+        memory_dim=16,
+        time_dim=8,
+        embedding_dim=16,
+        heads=4,
+        local_adapter_dim=4,
+    )
+
+    shared = extract_shared_parameters(model)
+
+    assert any(name.startswith("event_encoder.") for name in shared)
+    assert any(name.startswith("embedding.") for name in shared)
+    assert not any(name.startswith("local_adapter.") for name in shared)
+    assert any(
+        name.startswith("local_adapter.")
+        for name, _ in model.named_parameters()
+    )
