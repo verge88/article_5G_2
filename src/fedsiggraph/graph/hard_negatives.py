@@ -13,7 +13,8 @@ class HardNegativeSampler:
     """Generate locally plausible but semantically incompatible events.
 
     Compatibility tables are learned only from the benign training partition.
-    This avoids constructing trivial impossible edges such as UE -> NRF over PFCP.
+    Endpoint negatives reuse a *real training entity* of an incompatible role so
+    the detector cannot solve the task merely by spotting a synthetic/unknown ID.
     """
 
     def __init__(
@@ -34,6 +35,7 @@ class HardNegativeSampler:
             tuple[str, str, str], set[str]
         ] = defaultdict(set)
         self._dst_roles_by_protocol: dict[str, set[str]] = defaultdict(set)
+        self._entities_by_role: dict[str, set[str]] = defaultdict(set)
 
         for event in events:
             self._procedures_by_protocol[event.protocol].add(event.procedure)
@@ -44,6 +46,7 @@ class HardNegativeSampler:
                 (event.src_role, event.procedure, event.protocol)
             ].add(event.dst_role)
             self._dst_roles_by_protocol[event.protocol].add(event.dst_role)
+            self._entities_by_role[event.dst_role].add(event.dst_entity)
 
     def procedure_negative(self, event: CanonicalEvent) -> CanonicalEvent:
         """Keep endpoints/protocol valid but choose an unseen procedure for the pair."""
@@ -64,18 +67,24 @@ class HardNegativeSampler:
         )
 
     def endpoint_negative(self, event: CanonicalEvent) -> CanonicalEvent:
-        """Keep procedure/protocol fixed but choose an incompatible destination role."""
+        """Keep procedure/protocol fixed but choose a real entity of an incompatible role."""
         allowed = self._dst_roles_by_src_proc[
             (event.src_role, event.procedure, event.protocol)
         ]
-        candidates = sorted(self._dst_roles_by_protocol[event.protocol] - allowed)
-        if not candidates:
+        candidate_roles = sorted(
+            role
+            for role in (self._dst_roles_by_protocol[event.protocol] - allowed)
+            if self._entities_by_role.get(role)
+        )
+        if not candidate_roles:
             raise LookupError(
                 "no protocol-compatible endpoint negative is available"
             )
-        dst_role = self._rng.choice(candidates)
+
+        dst_role = self._rng.choice(candidate_roles)
+        dst_entity = self._rng.choice(sorted(self._entities_by_role[dst_role]))
         return event.synthetic(
-            dst_entity=f"SYNTHETIC::{dst_role}",
+            dst_entity=dst_entity,
             dst_role=dst_role,
             label=1,
             attack_type="synthetic_endpoint_negative",
