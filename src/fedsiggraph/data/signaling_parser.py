@@ -197,7 +197,96 @@ def _ngap_semantics(message: str) -> tuple[str, str, str, str, str]:
     elif procedure == "InitialUeMessage":
         direction = "UPLINK"
 
+    # Some captures expose the NAS message but not a decoded NGAP procedure.
+    # The NAS message direction still provides a standards-aligned role signal.
+    if direction == "UNKNOWN" and nas:
+        if message_type in {
+            "RegistrationRequest",
+            "RegistrationComplete",
+            "AuthenticationResponse",
+            "ULNASTransport",
+            "PDUSessionEstablishmentRequest",
+            "PDUSessionModificationRequest",
+            "PDUSessionReleaseRequest",
+            "PDUSessionReleaseComplete",
+        }:
+            direction = "UPLINK"
+        elif message_type in {
+            "RegistrationAccept",
+            "AuthenticationRequest",
+            "DLNASTransport",
+            "PDUSessionEstablishmentAccept",
+            "PDUSessionModificationCommand",
+            "PDUSessionReleaseCommand",
+        }:
+            direction = "DOWNLINK"
+
     return ("NGAP", "NGAP", procedure, direction, message_type)
+
+
+def infer_role_map(
+    events: Iterable[CanonicalEvent],
+) -> dict[str, str]:
+    """Infer static NF roles from directional protocol semantics.
+
+    This uses no anomaly labels. It is intended for datasets whose PCAP/CSV
+    contains only IP endpoints but whose protocol direction uniquely identifies
+    common N2/N4 roles. Ties are left unresolved instead of guessed.
+    """
+    from collections import Counter, defaultdict
+
+    votes: dict[str, Counter[str]] = defaultdict(Counter)
+
+    def vote(entity: str, role: str) -> None:
+        votes[entity][role] += 1
+
+    for event in events:
+        if event.protocol == "NGAP":
+            if event.direction == "UPLINK":
+                vote(event.src_entity, "gNB")
+                vote(event.dst_entity, "AMF")
+            elif event.direction == "DOWNLINK":
+                vote(event.src_entity, "AMF")
+                vote(event.dst_entity, "gNB")
+
+        elif event.protocol == "PFCP":
+            lower = event.procedure.lower()
+            if "request" in lower:
+                vote(event.src_entity, "SMF")
+                vote(event.dst_entity, "UPF")
+            elif "response" in lower:
+                vote(event.src_entity, "UPF")
+                vote(event.dst_entity, "SMF")
+
+    inferred: dict[str, str] = {}
+    for entity, counts in votes.items():
+        ranked = counts.most_common()
+        if not ranked:
+            continue
+        if len(ranked) > 1 and ranked[0][1] == ranked[1][1]:
+            continue
+        inferred[entity] = ranked[0][0]
+    return inferred
+
+
+def apply_role_map(
+    events: Iterable[CanonicalEvent],
+    role_by_entity: Mapping[str, str],
+) -> list[CanonicalEvent]:
+    """Return immutable events with entity roles resolved from static metadata."""
+    result = []
+    for event in events:
+        src_role = role_by_entity.get(event.src_entity, event.src_role)
+        dst_role = role_by_entity.get(event.dst_entity, event.dst_role)
+        result.append(
+            event.synthetic(
+                src_role=src_role,
+                dst_role=dst_role,
+                src_type=("gNB" if src_role == "gNB" else "NF"),
+                dst_type=("gNB" if dst_role == "gNB" else "NF"),
+            )
+        )
+    return result
 
 
 class SignalingParserAdapter:
