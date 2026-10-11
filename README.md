@@ -362,3 +362,58 @@ family solely for final reporting. It is excluded from vocabulary fitting,
 numeric scaling, model input, training loss, memory updates, and threshold
 calibration. Trainers verify that its binary labels align exactly with
 `test.pt` before producing per-attack recall.
+
+
+## Correlated multi-protocol signaling preparation
+
+For the cross-protocol hypothesis, use exports from
+`lsinfo3/5G-Signaling-Parser` or an enriched compatible CSV. The minimum
+columns are:
+
+```text
+time;src;dst;message;ue
+```
+
+If the export also includes one of
+
+```text
+pdu_session_id
+pduid
+sm_context
+smcontext
+seid_c
+seid_u
+seid
+```
+
+FedSigGraph converts the value into a deployment-local pseudonymous
+`session_context`. Raw SUPI/UE/session identifiers are never stored in the
+canonical event.
+
+Prepare benign and test captures with:
+
+```bash
+python scripts/prepare_signaling_parser.py \
+  --benign-dir /path/to/benign/export \
+  --test-dir /path/to/test/export \
+  --deployment-id site-a \
+  --output data/site-a-correlated
+```
+
+For a labelled attack capture:
+
+```bash
+python scripts/prepare_signaling_parser.py \
+  --benign-csv benign_m_stats.csv \
+  --test-csv attack_m_stats.csv \
+  --test-label 1 \
+  --attack-type pfcp_session_deletion \
+  --deployment-id site-a \
+  --output data/site-a-correlated
+```
+
+The generated `manifest.json` reports both explicit context coverage and the
+fraction of events that form a cross-protocol transition. A dataset should only
+be used to support the cross-protocol contribution when this coverage is
+non-trivial; temporal proximity alone is never used to invent a session link.
+
