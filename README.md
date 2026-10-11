@@ -233,6 +233,64 @@ experiments, but it must **not** be used as evidence for the cross-protocol
 contribution. A richer parser/dataset exposing shared UE/PDU-session
 identifiers is required for that experiment.
 
+
+## Semantic TGN and TemporalHEAT
+
+After preprocessing, the progressively stronger centralized models can be run
+individually:
+
+```bash
+python scripts/train_semantic_tgn.py \
+  --data data/granomaly-smf \
+  --epochs 20 \
+  --test-memory safe \
+  --output results/granomaly-smf-semantic-tgn.json
+
+python scripts/train_temporal_heat.py \
+  --data data/granomaly-smf \
+  --epochs 20 \
+  --test-memory safe \
+  --output results/granomaly-smf-temporal-heat.json
+```
+
+Both semantic trainers report the fraction of training events for which a
+non-trivial train-derived endpoint/procedure hard negative was available.
+Endpoint negatives reuse a real train-known entity of an incompatible role;
+synthetic or unknown node IDs are not used as shortcuts.
+
+Dataset-level time metadata is stored in `manifest.json`, while
+`TemporalData` contains only event-aligned tensors. This is required for
+correct batching with `TemporalDataLoader`.
+
+## Framework-independent federated training
+
+Prepare every deployment with the federated preparation script so all clients
+share the same semantic schema:
+
+```bash
+python scripts/prepare_federated_client.py ...
+```
+
+Then run FedAvg or FedProx without introducing an orchestration dependency:
+
+```bash
+python scripts/train_federated.py \
+  --clients data/site-a data/site-b data/site-c \
+  --strategy fedprox \
+  --prox-mu 0.01 \
+  --rounds 10 \
+  --local-epochs 1 \
+  --output results/federated-fedprox.json
+```
+
+The coordinator validates the shared semantic-schema fingerprint before
+training. Only trainable shared model parameters are aggregated. TGN memory,
+buffers, identity mappings, local calibration state, and parameters under the
+`local_adapter.*` namespace remain private. The framework-independent
+coordinator is intentionally the reference implementation; a Flower adapter can
+wrap the same parameter-partition and aggregation functions later.
+
+
 ## Evaluation-only attack metadata
 
 Preparation also writes `test_metadata.csv`. It contains the original attack
