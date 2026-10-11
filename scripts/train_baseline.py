@@ -297,7 +297,10 @@ def main() -> None:
             test_labels,
             test_scores,
             threshold,
-            duration_ns=temporal_duration_ns(test),
+            duration_ns=temporal_duration_ns(
+                test,
+                time_unit_ns=int(manifest.get("time_unit_ns", 1_000)),
+            ),
         ),
         "per_attack": attack_type_breakdown(
             metadata.attack_types,
