@@ -48,10 +48,24 @@ def build_context_transition_features(
     last_by_context: dict[tuple[str, str], CanonicalEvent] = {}
     last_history_timestamp: int | None = None
 
-    for event in history_events:
-        key = event.explicit_context_key
-        if key is not None:
+    def keys(event: CanonicalEvent) -> tuple[tuple[str, str], ...]:
+        """Return explicit context keys from most to least specific."""
+        result: list[tuple[str, str]] = []
+        if event.session_context:
+            result.append(("session", event.session_context))
+        if event.ue_context:
+            result.append(("ue", event.ue_context))
+        return tuple(result)
+
+    def remember(event: CanonicalEvent) -> None:
+        # Store both explicit identifiers when available. A later PFCP event
+        # may expose a session identifier while the preceding SBI/NGAP event
+        # exposes only the shared UE context (or vice versa).
+        for key in keys(event):
             last_by_context[key] = event
+
+    for event in history_events:
+        remember(event)
         last_history_timestamp = event.timestamp_ns
 
     if target_events and last_history_timestamp is not None:
@@ -67,8 +81,14 @@ def build_context_transition_features(
     cross_protocol_mask: list[bool] = []
 
     for event in target_events:
-        key = event.explicit_context_key
-        previous = last_by_context.get(key) if key is not None else None
+        previous = next(
+            (
+                last_by_context[key]
+                for key in keys(event)
+                if key in last_by_context
+            ),
+            None,
+        )
 
         if previous is None:
             prev_protocol.append(vocab.protocol.pad_id)
@@ -85,8 +105,7 @@ def build_context_transition_features(
             history_mask.append(True)
             cross_protocol_mask.append(previous.protocol != event.protocol)
 
-        if key is not None:
-            last_by_context[key] = event
+        remember(event)
 
     return ContextTransitionFeatures(
         prev_protocol_id=np.asarray(prev_protocol, dtype=np.int64),
