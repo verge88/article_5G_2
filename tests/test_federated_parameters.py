@@ -123,3 +123,15 @@ def test_robust_aggregation_rejects_extreme_client():
 
     assert median["w"].item() == pytest.approx(1.0)
     assert trimmed["w"].item() == pytest.approx(1.0)
+
+
+
+def test_trimmed_mean_rejects_noop_trim_ratio():
+    clients = [
+        ({"w": torch.tensor([0.0])}, 1),
+        ({"w": torch.tensor([1.0])}, 1),
+        ({"w": torch.tensor([2.0])}, 1),
+    ]
+
+    with pytest.raises(ValueError, match="has no effect"):
+        trimmed_mean(clients, trim_ratio=0.2)
