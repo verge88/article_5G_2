@@ -49,6 +49,11 @@ def parse_args() -> argparse.Namespace:
         default="safe",
     )
     parser.add_argument(
+        "--allow-debug-subset",
+        action="store_true",
+        help="Permit explicitly non-research debug subsets.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print commands without executing them.",
@@ -84,6 +89,8 @@ def model_command(
         "--output",
         str(output),
     ]
+    if args.allow_debug_subset:
+        common.append("--allow-debug-subset")
 
     if model == "numeric_tgn":
         return [sys.executable, "scripts/train_baseline.py", *common]
