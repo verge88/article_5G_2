@@ -180,3 +180,29 @@ def test_role_inference_recovers_gnb_amf_smf_upf_from_n2_n4_direction():
     assert resolved[0].dst_role == "AMF"
     assert resolved[2].src_role == "SMF"
     assert resolved[2].dst_role == "UPF"
+
+
+def test_inferred_role_map_never_overrides_explicit_role_metadata():
+    df = pd.DataFrame(
+        {
+            "time": ["1.0"],
+            "src": ["custom-ran"],
+            "dst": ["custom-amf"],
+            "message": ["UNKNOWN_NGAP, NASType.RegistrationRequest"],
+            "ue": ["imsi-001"],
+        }
+    )
+    events = SignalingParserAdapter(
+        "site-a",
+        role_by_entity={
+            "custom-ran": "RAN_VENDOR_ROLE",
+            "custom-amf": "AMF",
+        },
+    ).from_dataframe(df, label=0)
+
+    inferred = infer_role_map(events)
+    resolved = apply_role_map(events, inferred)
+
+    assert inferred["custom-ran"] == "gNB"
+    assert resolved[0].src_role == "RAN_VENDOR_ROLE"
+    assert resolved[0].dst_role == "AMF"
