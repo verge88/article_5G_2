@@ -1,0 +1,82 @@
+name: granomaly-real-debug
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "feat/fedsiggraph-v1"
+    paths:
+      - ".github/workflows/granomaly-real-debug.yml"
+
+jobs:
+  nrf-debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install CPU ML stack
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[ml,dev]"
+
+      - name: Fetch and prepare real NRF capture
+        run: |
+          python scripts/fetch_granomaly.py \
+            --output experiments/granomaly-debug/raw
+
+          python scripts/prepare_granomaly.py \
+            --normal experiments/granomaly-debug/raw/bridge_normal.csv \
+            --attack experiments/granomaly-debug/raw/bridge_attack_nrf.csv \
+            --output experiments/granomaly-debug/prepared-full
+
+      - name: Create explicitly non-research real-format subset
+        run: |
+          python scripts/make_prepared_debug_subset.py \
+            --input experiments/granomaly-debug/prepared-full \
+            --output experiments/granomaly-debug/prepared-debug \
+            --train-events 1500 \
+            --val-events 300 \
+            --calibration-events 300 \
+            --test-events 700
+
+      - name: Run real-format debug ablation
+        run: |
+          python scripts/run_ablation.py \
+            --data experiments/granomaly-debug/prepared-debug \
+            --output-dir experiments/granomaly-debug/results \
+            --models \
+              numeric_tgn \
+              semantic_tgn \
+              temporal_heat \
+            --seeds 1 \
+            --epochs 1 \
+            --batch-size 256 \
+            --neighbors 16 \
+            --test-memory safe \
+            --allow-debug-subset
+
+      - name: Render debug table
+        if: success()
+        run: |
+          python scripts/render_results.py \
+            --summary experiments/granomaly-debug/results/summary.json \
+            --format markdown \
+            --output experiments/granomaly-debug/debug_table.md
+          echo '## NON-RESEARCH real-format smoke metrics' >> "$GITHUB_STEP_SUMMARY"
+          cat experiments/granomaly-debug/debug_table.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload debug outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: granomaly-real-debug
+          path: experiments/granomaly-debug/
+          retention-days: 14
