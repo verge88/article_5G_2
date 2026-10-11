@@ -11,6 +11,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from fedsiggraph.data import SignalingParserAdapter, fit_preprocessing
+from fedsiggraph.data.signaling_parser import apply_role_map, infer_role_map
 from fedsiggraph.data.pyg import to_temporal_data
 from fedsiggraph.evaluation.eligibility import research_claim_eligibility
 
@@ -27,6 +28,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", required=True)
     parser.add_argument("--deployment-id", required=True)
     parser.add_argument("--role-map")
+    parser.add_argument(
+        "--infer-roles",
+        action="store_true",
+        help=(
+            "Fill UNKNOWN_NF roles from NGAP/PFCP direction semantics. "
+            "Explicit role-map/hostname roles are preserved."
+        ),
+    )
     parser.add_argument("--benign-pattern", default="*_m_stats.csv")
     parser.add_argument("--test-pattern", default="*_m_stats.csv")
     parser.add_argument("--test-label", type=int, choices=[0, 1], default=None)
@@ -199,6 +208,19 @@ def main() -> None:
             attack_type=args.attack_type,
         )
 
+    inferred_roles = {"benign": {}, "test": {}}
+    if args.infer_roles:
+        inferred_roles["benign"] = infer_role_map(benign_events)
+        benign_events = apply_role_map(
+            benign_events,
+            inferred_roles["benign"],
+        )
+        inferred_roles["test"] = infer_role_map(test_events)
+        test_events = apply_role_map(
+            test_events,
+            inferred_roles["test"],
+        )
+
     fitted = fit_preprocessing(
         benign_events,
         test_events,
@@ -313,6 +335,7 @@ def main() -> None:
     }
     manifest = {
         "source_adapter": "5G-Signaling-Parser",
+        "inferred_roles": inferred_roles,
         "source_files": {
             "benign": source_inventory(
                 csv_path=args.benign_csv,
