@@ -45,6 +45,15 @@ def parse_args() -> argparse.Namespace:
         default="safe",
     )
     parser.add_argument(
+        "--test-history-mode",
+        choices=["reset", "auto", "continuous"],
+        default="reset",
+        help=(
+            "Cross-source experiments default to reset so independent captures "
+            "never share temporal memory or explicit context history."
+        ),
+    )
+    parser.add_argument(
         "--allow-zero-cross-protocol",
         action="store_true",
         help=(
@@ -111,6 +120,8 @@ def main() -> None:
         str(prepared),
         "--deployment-id",
         args.deployment_id,
+        "--test-history-mode",
+        args.test_history_mode,
     ]
     if benign_csv:
         prepare += ["--benign-csv", benign_csv]
