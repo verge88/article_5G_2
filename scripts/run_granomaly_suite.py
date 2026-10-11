@@ -10,6 +10,9 @@ import subprocess
 import sys
 
 
+from fedsiggraph.evaluation.provenance import runtime_provenance
+
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -143,6 +146,7 @@ def main() -> None:
         "learning_rate": args.lr,
         "target_fpr": args.target_fpr,
         "test_memory": args.test_memory,
+        "provenance": runtime_provenance(ROOT),
         "results": experiment_summaries,
     }
 
