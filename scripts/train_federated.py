@@ -18,8 +18,10 @@ import torch
 
 from fedsiggraph.anomaly.calibration import CompositeScoreCalibrator
 from fedsiggraph.federated import (
+    coordinate_median,
     extract_shared_parameters,
     load_shared_parameters,
+    trimmed_mean,
     weighted_average,
 )
 from fedsiggraph.training.metadata import load_test_metadata
@@ -65,6 +67,12 @@ def parse_args() -> argparse.Namespace:
         default="fedprox",
     )
     parser.add_argument("--prox-mu", type=float, default=0.01)
+    parser.add_argument(
+        "--aggregation",
+        choices=["weighted_mean", "coordinate_median", "trimmed_mean"],
+        default="weighted_mean",
+    )
+    parser.add_argument("--trim-ratio", type=float, default=0.2)
     parser.add_argument("--neighbors", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--event-dim", type=int, default=64)
@@ -338,7 +346,15 @@ def main() -> None:
                 }
             )
 
-        global_parameters = weighted_average(client_updates)
+        if args.aggregation == "weighted_mean":
+            global_parameters = weighted_average(client_updates)
+        elif args.aggregation == "coordinate_median":
+            global_parameters = coordinate_median(client_updates)
+        else:
+            global_parameters = trimmed_mean(
+                client_updates, trim_ratio=args.trim_ratio
+            )
+
         round_summary = {
             "round": round_index,
             "clients": client_metrics,
@@ -363,6 +379,10 @@ def main() -> None:
     result = {
         "model": "federated_temporal_heat",
         "strategy": args.strategy,
+        "aggregation": args.aggregation,
+        "trim_ratio": (
+            args.trim_ratio if args.aggregation == "trimmed_mean" else None
+        ),
         "prox_mu": args.prox_mu if args.strategy == "fedprox" else 0.0,
         "rounds": args.rounds,
         "local_epochs": args.local_epochs,
