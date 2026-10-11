@@ -19,6 +19,22 @@ from .continuation import ContextContinuationHead
 from .semantic_tgn import SemanticAnomalyHead, SemanticEventEncoder
 
 
+class LocalResidualAdapter(nn.Module):
+    """Small deployment-private residual adapter for personalized federation."""
+
+    def __init__(self, channels: int, bottleneck: int) -> None:
+        super().__init__()
+        if bottleneck <= 0:
+            raise ValueError("adapter bottleneck must be positive")
+        self.down = nn.Linear(channels, bottleneck)
+        self.up = nn.Linear(bottleneck, channels)
+        nn.init.zeros_(self.up.weight)
+        nn.init.zeros_(self.up.bias)
+
+    def forward(self, x: Tensor) -> Tensor:
+        return x + self.up(F.gelu(self.down(x)))
+
+
 class TemporalHEATEmbedding(nn.Module):
     """Relation-aware temporal neighborhood aggregation."""
 
@@ -118,12 +134,18 @@ class TemporalHEAT(nn.Module):
         embedding_dim: int = 128,
         heads: int = 4,
         continuation_hidden_dim: int = 128,
+        local_adapter_dim: int = 0,
     ) -> None:
         super().__init__()
         self.event_encoder = SemanticEventEncoder(
             vocab_sizes=vocab_sizes,
             numeric_dim=numeric_dim,
             output_dim=event_dim,
+        )
+        self.local_adapter = (
+            LocalResidualAdapter(event_dim, local_adapter_dim)
+            if local_adapter_dim > 0
+            else nn.Identity()
         )
         self.memory = TGNMemory(
             num_nodes=num_nodes,
@@ -160,7 +182,7 @@ class TemporalHEAT(nn.Module):
         relation_id: Tensor | None = None,
         procedure_id: Tensor | None = None,
     ) -> Tensor:
-        return self.event_encoder(
+        encoded = self.event_encoder(
             batch.msg,
             src_role_id=batch.src_role_id,
             dst_role_id=(
@@ -176,6 +198,7 @@ class TemporalHEAT(nn.Module):
             message_type_id=batch.message_type_id,
             direction_id=batch.direction_id,
         )
+        return self.local_adapter(encoded)
 
     def score_embeddings(
         self,
