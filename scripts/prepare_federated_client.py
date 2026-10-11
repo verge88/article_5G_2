@@ -311,6 +311,9 @@ def main() -> None:
             ),
         },
         "test_metadata_file": "test_metadata.csv",
+        "context_history_size": int(
+            train_data.context_sequence_mask.size(1)
+        ),
         "time_unit": "microseconds",
         "time_unit_ns": 1_000,
     }
