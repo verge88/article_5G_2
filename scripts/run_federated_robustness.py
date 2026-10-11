@@ -65,6 +65,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--time-dim", type=int, default=32)
     parser.add_argument("--embedding-dim", type=int, default=128)
     parser.add_argument("--heads", type=int, default=4)
+    parser.add_argument(
+        "--continuation-history-mode",
+        choices=["immediate", "sequence"],
+        default="sequence",
+    )
     return parser.parse_args()
 
 
@@ -114,6 +119,8 @@ def run_one(
         str(args.embedding_dim),
         "--heads",
         str(args.heads),
+        "--continuation-history-mode",
+        args.continuation_history_mode,
         "--seed",
         str(seed),
         "--output",
@@ -272,6 +279,7 @@ def main() -> None:
         "poison_clients": args.poison_client,
         "poison_mode": args.poison_mode if args.poison_client else None,
         "poison_factor": args.poison_factor if args.poison_client else None,
+        "continuation_history_mode": args.continuation_history_mode,
         "provenance": runtime_provenance(ROOT),
         "runs": runs,
         "groups": summary_groups,
