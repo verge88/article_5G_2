@@ -275,6 +275,11 @@ class SemanticRunner:
 
 
 def vocab_sizes_from_preprocessing(preprocessing: dict) -> dict[str, int]:
+    if "vocab_sizes" in preprocessing:
+        return {
+            name: int(size)
+            for name, size in preprocessing["vocab_sizes"].items()
+        }
     return {
         name: len(mapping)
         for name, mapping in preprocessing["vocab"].items()
