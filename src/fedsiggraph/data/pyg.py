@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Iterable, Sequence
 
-from .context import build_context_transition_features
+from .context import (
+    DEFAULT_CONTEXT_HISTORY_SIZE,
+    build_context_transition_features,
+)
 from .features import CausalNumericFeatureEncoder
 from .index import LocalNodeIndex
 from .schema import CanonicalEvent
@@ -20,6 +23,7 @@ def to_temporal_data(
     time_origin_ns: int,
     history: Sequence[CanonicalEvent] | Iterable[CanonicalEvent] = (),
     time_unit_ns: int = 1_000,
+    context_history_size: int = DEFAULT_CONTEXT_HISTORY_SIZE,
 ):
     """Build a continuous-time event stream.
 
@@ -55,6 +59,7 @@ def to_temporal_data(
         ordered,
         vocab=vocab,
         history=history_ordered,
+        history_size=context_history_size,
     )
 
     src: list[int] = []
@@ -108,6 +113,18 @@ def to_temporal_data(
         ),
         cross_protocol_mask=torch.as_tensor(
             transitions.cross_protocol_mask, dtype=torch.bool
+        ),
+        context_protocol_history_id=torch.as_tensor(
+            transitions.protocol_history_id, dtype=torch.long
+        ),
+        context_relation_history_id=torch.as_tensor(
+            transitions.relation_history_id, dtype=torch.long
+        ),
+        context_procedure_history_id=torch.as_tensor(
+            transitions.procedure_history_id, dtype=torch.long
+        ),
+        context_sequence_mask=torch.as_tensor(
+            transitions.sequence_mask, dtype=torch.bool
         ),
         **kwargs,
     )
