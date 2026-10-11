@@ -302,6 +302,16 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     clients = build_clients(args, device)
+    known_clients = {client.name for client in clients}
+    requested_poison = set(args.poison_client)
+    unknown_poison = sorted(requested_poison - known_clients)
+    if unknown_poison:
+        raise ValueError(
+            f"poison-client names do not match prepared clients: {unknown_poison}"
+        )
+    if requested_poison and args.poison_factor < 0:
+        raise ValueError("poison-factor must be non-negative")
+
     global_parameters = extract_shared_parameters(clients[0].runner.model)
 
     history: list[dict[str, object]] = []
@@ -345,7 +355,7 @@ def main() -> None:
                 cross_coverages.append(cross_coverage)
 
             shared = extract_shared_parameters(client.runner.model)
-            poisoned = client.name in set(args.poison_client)
+            poisoned = client.name in requested_poison
             if poisoned:
                 shared = poison_update(
                     shared,
@@ -413,7 +423,7 @@ def main() -> None:
         "device": str(device),
         "local_adapter_dim": args.local_adapter_dim,
         "target_fpr": args.target_fpr,
-        "poison_clients": sorted(set(args.poison_client)),
+        "poison_clients": sorted(requested_poison),
         "poison_mode": (
             args.poison_mode if args.poison_client else None
         ),
