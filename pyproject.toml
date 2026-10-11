@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fedsiggraph"
+version = "0.1.0"
+description = "Causal semantic temporal-graph anomaly detection for 5G Core signaling"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.26",
+  "pandas>=2.2",
+]
+
+[project.optional-dependencies]
+ml = [
+  "torch>=2.2",
+  "torch-geometric>=2.8",
+  "scikit-learn>=1.5",
+]
+dev = [
+  "pytest>=8.0",
+]
+pcap = [
+  "pyshark>=0.6",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"

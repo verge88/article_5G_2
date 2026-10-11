@@ -1,0 +1,103 @@
+name: origami-data-sanity
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "scripts/export_correlated_pcap.py"
+      - "scripts/fetch_cross_protocol_sources.py"
+      - "scripts/inspect_signaling_source.py"
+      - "scripts/inspect_origami_state_machine.py"
+      - "src/fedsiggraph/data/causal_correlation.py"
+      - "src/fedsiggraph/data/signaling_parser.py"
+      - ".github/workflows/origami-data-sanity.yml"
+
+concurrency:
+  group: origami-data-sanity-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  causal-pcap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install tshark
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tshark
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" pyshark
+
+      - name: Download pinned ORIGAMI example PCAP
+        run: |
+          python scripts/fetch_cross_protocol_sources.py \
+            --output data/raw/cross-protocol \
+            --origami pcap
+
+      - name: Export causally correlated ORIGAMI signaling
+        run: |
+          mkdir -p data/parsed/origami
+          python scripts/export_correlated_pcap.py \
+            --pcap data/raw/cross-protocol/origami/example.pcap.gz \
+            --output data/parsed/origami/origami_m_stats.csv
+
+      - name: Inspect causal PCAP coverage
+        run: |
+          python scripts/inspect_signaling_source.py \
+            --csv data/parsed/origami/origami_m_stats.csv \
+            --infer-roles \
+            --output data/parsed/origami/inspection.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: origami-causal-pcap-inspection
+          path: |
+            data/raw/cross-protocol/source_manifest.json
+            data/parsed/origami/origami_m_stats.csv
+            data/parsed/origami/inspection.json
+
+  official-state-machine-csv:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Download pinned ORIGAMI official parser CSV
+        run: |
+          python scripts/fetch_cross_protocol_sources.py \
+            --output data/raw/cross-protocol-csv \
+            --origami csv
+
+      - name: Inspect official state-machine CSV
+        run: |
+          mkdir -p data/parsed/origami-official
+          python scripts/inspect_origami_state_machine.py \
+            --csv data/raw/cross-protocol-csv/origami/example.csv \
+            --output data/parsed/origami-official/inspection.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: origami-official-state-machine-inspection
+          path: |
+            data/raw/cross-protocol-csv/source_manifest.json
+            data/parsed/origami-official/inspection.json

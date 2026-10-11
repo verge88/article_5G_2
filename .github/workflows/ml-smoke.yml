@@ -1,0 +1,47 @@
+name: ml-smoke
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ml-smoke-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytorch-geometric:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install project and PyG
+        run: pip install -e ".[dev]" torch-geometric scikit-learn
+      - name: Run PyG, hard-negative, and federated parameter smoke tests
+        run: >-
+          pytest
+          tests/test_pyg_smoke.py
+          tests/test_training_smoke.py
+          tests/test_endpoint_negative_table.py
+          tests/test_federated_parameters.py
+          tests/test_federated_poisoning.py
+          tests/test_signaling_prepare_smoke.py
+          tests/test_scoped_metrics.py
+          tests/test_continuation_sequence.py
+          -q
+      - name: Check federated experiment CLIs
+        run: |
+          python scripts/train_federated.py --help
+          python scripts/run_federated_robustness.py --help
+          python scripts/run_granomaly_suite.py --help
+          python scripts/prepare_signaling_parser.py --help
+          python scripts/run_cross_protocol_suite.py --help
+          python scripts/fetch_cross_protocol_sources.py --help
+          python scripts/parse_attack_pcaps.py --help
+          python scripts/inspect_signaling_source.py --help
