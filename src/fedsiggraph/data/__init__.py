@@ -1,5 +1,6 @@
 """Input schemas, source adapters, and leakage-safe preprocessing."""
 
+from .causal_correlation import CausalCorrelationTracker, CorrelationSnapshot
 from .features import CausalNumericFeatureEncoder
 from .granomaly import GranomalyAdapter
 from .signaling_parser import SignalingParserAdapter
@@ -15,6 +16,8 @@ from .vocab import FrozenVocabulary, SemanticVocabularies
 
 __all__ = [
     "CanonicalEvent",
+    "CausalCorrelationTracker",
+    "CorrelationSnapshot",
     "GranomalyAdapter",
     "SignalingParserAdapter",
     "CausalNumericFeatureEncoder",
