@@ -37,6 +37,10 @@ _HTTP_METHOD = re.compile(
     re.IGNORECASE,
 )
 _HTTP_STATUS = re.compile(r"^[1-5][0-9]{2}$")
+_HTTP_COMPACT = re.compile(
+    r"^(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)[-_](.+)$",
+    re.IGNORECASE,
+)
 _NAS_TYPE = re.compile(r"NASType\.([A-Za-z0-9_]+)")
 
 _PFCP_PROCEDURES = (
@@ -117,6 +121,18 @@ def _http_semantics(message: str) -> tuple[str, str, str, str] | None:
             "SBI",
             f"SBI:{first}",
             f"{method}:{normalized_path}",
+            "REQUEST",
+        )
+
+    compact = _HTTP_COMPACT.match(stripped)
+    if compact:
+        method = compact.group(1).upper()
+        endpoint = compact.group(2).strip()
+        service = endpoint.split("-", 1)[0].split("_", 1)[0]
+        return (
+            "SBI",
+            f"SBI:{service}",
+            f"{method}:{endpoint}",
             "REQUEST",
         )
 
