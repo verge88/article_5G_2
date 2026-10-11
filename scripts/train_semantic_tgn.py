@@ -23,8 +23,8 @@ from fedsiggraph.training.metrics import (
 )
 from fedsiggraph.training.metadata import load_test_metadata
 from fedsiggraph.training.negatives import (
+    EndpointNegativeTable,
     ProcedureNegativeTable,
-    sample_negative_destination,
 )
 
 
@@ -75,6 +75,7 @@ class SemanticRunner:
         self.total_capacity = total_capacity
         self.token_mask_prob = token_mask_prob
         self.procedure_negatives = ProcedureNegativeTable(train_data, seed)
+        self.endpoint_negatives = EndpointNegativeTable(train_data, seed + 1)
 
         self.model = SemanticCausalTGN(
             num_nodes=self.num_nodes,
@@ -153,9 +154,7 @@ class SemanticRunner:
 
             src = batch.src
             pos_dst = batch.dst
-            neg_dst = sample_negative_destination(
-                pos_dst, num_nodes=self.num_nodes
-            )
+            neg_dst, endpoint_mask = self.endpoint_negatives.sample(batch)
             nodes = torch.cat([src, pos_dst, neg_dst]).unique()
             z, assoc = self._embedding_context(nodes)
 
@@ -174,20 +173,24 @@ class SemanticRunner:
                 z[assoc[pos_dst]],
                 benign_event,
             )
-            endpoint_logits = self.model.score_embeddings(
-                z[assoc[src]],
-                z[assoc[neg_dst]],
-                endpoint_event,
-            )
-
             losses = [
                 self.criterion(
                     benign_logits, torch.zeros_like(benign_logits)
                 ),
-                self.criterion(
-                    endpoint_logits, torch.ones_like(endpoint_logits)
-                ),
             ]
+
+            if endpoint_mask.any():
+                endpoint_logits = self.model.score_embeddings(
+                    z[assoc[src[endpoint_mask]]],
+                    z[assoc[neg_dst[endpoint_mask]]],
+                    endpoint_event[endpoint_mask],
+                )
+                losses.append(
+                    self.criterion(
+                        endpoint_logits,
+                        torch.ones_like(endpoint_logits),
+                    )
+                )
 
             if procedure_mask.any():
                 procedure_logits = self.model.score_embeddings(
