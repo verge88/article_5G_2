@@ -22,6 +22,10 @@ from fedsiggraph.training.metrics import (
     temporal_duration_ns,
 )
 from fedsiggraph.training.metadata import load_test_metadata
+from fedsiggraph.training.negatives import (
+    ProcedureNegativeTable,
+    sample_negative_destination,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -46,65 +50,6 @@ def parse_args() -> argparse.Namespace:
 
 def load_temporal(path: Path):
     return torch.load(path, weights_only=False)
-
-
-class ProcedureNegativeTable:
-    """Train-only same-protocol hard procedure candidates."""
-
-    def __init__(self, train_data, seed: int) -> None:
-        self.rng = random.Random(seed)
-        protocol_procedures: dict[int, set[int]] = {}
-        pair_procedures: dict[tuple[int, int, int], set[int]] = {}
-
-        rows = zip(
-            train_data.src_role_id.tolist(),
-            train_data.dst_role_id.tolist(),
-            train_data.protocol_id.tolist(),
-            train_data.procedure_id.tolist(),
-        )
-        for src_role, dst_role, protocol, procedure in rows:
-            protocol_procedures.setdefault(protocol, set()).add(procedure)
-            pair_procedures.setdefault(
-                (src_role, dst_role, protocol), set()
-            ).add(procedure)
-
-        self.candidates: dict[tuple[int, int, int], tuple[int, ...]] = {}
-        for key, seen_for_pair in pair_procedures.items():
-            protocol = key[2]
-            candidates = sorted(
-                protocol_procedures.get(protocol, set()) - seen_for_pair
-            )
-            self.candidates[key] = tuple(candidates)
-
-    def sample(self, batch) -> tuple[torch.Tensor, torch.Tensor]:
-        src_roles = batch.src_role_id.detach().cpu().tolist()
-        dst_roles = batch.dst_role_id.detach().cpu().tolist()
-        protocols = batch.protocol_id.detach().cpu().tolist()
-        actual = batch.procedure_id.detach().cpu().tolist()
-
-        sampled: list[int] = []
-        valid: list[bool] = []
-        for src_role, dst_role, protocol, current in zip(
-            src_roles, dst_roles, protocols, actual
-        ):
-            options = self.candidates.get(
-                (src_role, dst_role, protocol), ()
-            )
-            if options:
-                sampled.append(self.rng.choice(options))
-                valid.append(True)
-            else:
-                sampled.append(current)
-                valid.append(False)
-
-        return (
-            torch.as_tensor(
-                sampled, dtype=torch.long, device=batch.procedure_id.device
-            ),
-            torch.as_tensor(
-                valid, dtype=torch.bool, device=batch.procedure_id.device
-            ),
-        )
 
 
 class SemanticRunner:
@@ -170,21 +115,6 @@ class SemanticRunner:
         )
         return z, self.assoc
 
-    def _negative_dst(self, pos_dst: torch.Tensor) -> torch.Tensor:
-        if self.num_nodes < 3:
-            raise ValueError(
-                "semantic endpoint negatives require at least two known nodes"
-            )
-        neg = torch.randint(
-            1, self.num_nodes, pos_dst.shape, device=self.device
-        )
-        collision = neg == pos_dst
-        if collision.any():
-            shifted = (neg[collision] % (self.num_nodes - 1)) + 1
-            neg = neg.clone()
-            neg[collision] = shifted
-        return neg
-
     def _masked_benign_embedding(self, batch):
         if self.token_mask_prob <= 0:
             return self.model.encode_batch(batch)
@@ -223,7 +153,9 @@ class SemanticRunner:
 
             src = batch.src
             pos_dst = batch.dst
-            neg_dst = self._negative_dst(pos_dst)
+            neg_dst = sample_negative_destination(
+                pos_dst, num_nodes=self.num_nodes
+            )
             nodes = torch.cat([src, pos_dst, neg_dst]).unique()
             z, assoc = self._embedding_context(nodes)
 
