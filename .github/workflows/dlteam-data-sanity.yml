@@ -11,6 +11,10 @@ on:
       - "src/fedsiggraph/data/signaling_parser.py"
       - ".github/workflows/dlteam-data-sanity.yml"
 
+concurrency:
+  group: dlteam-data-sanity-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   fuzzing-pcaps:
     runs-on: ubuntu-latest
