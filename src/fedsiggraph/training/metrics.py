@@ -66,6 +66,53 @@ def evaluate_scores(
     }
 
 
+
+def evaluate_masked_scores(
+    y_true: np.ndarray,
+    y_score: np.ndarray,
+    threshold: float,
+    mask: np.ndarray,
+) -> dict[str, object]:
+    """Evaluate one semantically defined subset without changing its threshold.
+
+    The threshold must be calibrated globally on benign calibration traffic.
+    Re-calibrating on the subset would leak evaluation structure and make
+    full-stream and cross-protocol metrics incomparable.
+    """
+    y_true = np.asarray(y_true, dtype=np.int64)
+    y_score = np.asarray(y_score, dtype=np.float64)
+    mask = np.asarray(mask, dtype=bool)
+
+    if not (y_true.size == y_score.size == mask.size):
+        raise ValueError("y_true, y_score, and mask must have identical length")
+
+    selected_true = y_true[mask]
+    selected_score = y_score[mask]
+    benign_count = int((selected_true == 0).sum())
+    attack_count = int((selected_true == 1).sum())
+
+    if selected_true.size == 0:
+        return {
+            "eligible": False,
+            "count": 0,
+            "benign_count": 0,
+            "attack_count": 0,
+            "metrics": None,
+        }
+
+    return {
+        "eligible": True,
+        "count": int(selected_true.size),
+        "benign_count": benign_count,
+        "attack_count": attack_count,
+        "metrics": evaluate_scores(
+            selected_true,
+            selected_score,
+            threshold,
+        ),
+    }
+
+
 def attack_type_breakdown(
     attack_types: Sequence[str | None],
     y_true: np.ndarray,
