@@ -61,7 +61,6 @@ class HardNegativeSampler:
         procedure = self._rng.choice(candidates)
         return event.synthetic(
             procedure=procedure,
-            relation=f"SYNTHETIC::{event.protocol}::{procedure}",
             label=1,
             attack_type="synthetic_procedure_negative",
         )
