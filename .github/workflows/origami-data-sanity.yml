@@ -24,7 +24,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]" pyshark textual
+          pip install -e ".[dev]" pyshark
 
       - name: Download pinned ORIGAMI example PCAP
         run: |
@@ -43,5 +43,5 @@ jobs:
           name: origami-signaling-inspection
           path: |
             data/raw/cross-protocol/source_manifest.json
-            data/parsed/origami/parser_manifest.json
+            data/parsed/origami/origami_m_stats.csv
             data/parsed/origami/inspection.json
