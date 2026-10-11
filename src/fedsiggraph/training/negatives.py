@@ -68,12 +68,115 @@ class ProcedureNegativeTable:
         )
 
 
+class EndpointNegativeTable:
+    """Sample a real train-known node with a semantically incompatible role.
+
+    Candidate roles must occur as destinations for the same protocol somewhere
+    in benign training data, but must not be valid for the current
+    (src-role, procedure, protocol) context. This prevents unknown/synthetic node
+    identity from becoming a shortcut feature.
+    """
+
+    def __init__(self, train_data, seed: int) -> None:
+        self.rng = random.Random(seed)
+
+        # Learn a stable semantic role for every train-known node from both
+        # source and destination appearances.
+        node_roles: dict[int, set[int]] = {}
+        for node, role in zip(
+            train_data.src.tolist(), train_data.src_role_id.tolist()
+        ):
+            if node != 0:
+                node_roles.setdefault(int(node), set()).add(int(role))
+        for node, role in zip(
+            train_data.dst.tolist(), train_data.dst_role_id.tolist()
+        ):
+            if node != 0:
+                node_roles.setdefault(int(node), set()).add(int(role))
+
+        self.nodes_by_role: dict[int, tuple[int, ...]] = {}
+        role_nodes: dict[int, set[int]] = {}
+        for node, roles in node_roles.items():
+            # A canonical NF identity should map to one role. Ambiguous entities
+            # are excluded from hard-negative sampling rather than guessed.
+            if len(roles) != 1:
+                continue
+            role = next(iter(roles))
+            role_nodes.setdefault(role, set()).add(node)
+        self.nodes_by_role = {
+            role: tuple(sorted(nodes)) for role, nodes in role_nodes.items()
+        }
+
+        protocol_dst_roles: dict[int, set[int]] = {}
+        allowed_roles: dict[tuple[int, int, int], set[int]] = {}
+        for src_role, dst_role, protocol, procedure in zip(
+            train_data.src_role_id.tolist(),
+            train_data.dst_role_id.tolist(),
+            train_data.protocol_id.tolist(),
+            train_data.procedure_id.tolist(),
+        ):
+            protocol = int(protocol)
+            dst_role = int(dst_role)
+            protocol_dst_roles.setdefault(protocol, set()).add(dst_role)
+            allowed_roles.setdefault(
+                (int(src_role), int(procedure), protocol), set()
+            ).add(dst_role)
+
+        self.candidate_roles: dict[tuple[int, int, int], tuple[int, ...]] = {}
+        for key, allowed in allowed_roles.items():
+            protocol = key[2]
+            candidates = [
+                role
+                for role in protocol_dst_roles.get(protocol, set()) - allowed
+                if self.nodes_by_role.get(role)
+            ]
+            self.candidate_roles[key] = tuple(sorted(candidates))
+
+    def sample(self, batch) -> tuple[torch.Tensor, torch.Tensor]:
+        src_roles = batch.src_role_id.detach().cpu().tolist()
+        procedures = batch.procedure_id.detach().cpu().tolist()
+        protocols = batch.protocol_id.detach().cpu().tolist()
+        actual_dst = batch.dst.detach().cpu().tolist()
+
+        sampled: list[int] = []
+        valid: list[bool] = []
+        for src_role, procedure, protocol, current_dst in zip(
+            src_roles, procedures, protocols, actual_dst
+        ):
+            roles = self.candidate_roles.get(
+                (int(src_role), int(procedure), int(protocol)), ()
+            )
+            if not roles:
+                sampled.append(int(current_dst))
+                valid.append(False)
+                continue
+
+            role = self.rng.choice(roles)
+            nodes = [
+                node
+                for node in self.nodes_by_role[role]
+                if node != int(current_dst)
+            ]
+            if not nodes:
+                sampled.append(int(current_dst))
+                valid.append(False)
+                continue
+
+            sampled.append(self.rng.choice(nodes))
+            valid.append(True)
+
+        return (
+            torch.as_tensor(sampled, dtype=torch.long, device=batch.dst.device),
+            torch.as_tensor(valid, dtype=torch.bool, device=batch.dst.device),
+        )
+
+
 def sample_negative_destination(
     pos_dst: torch.Tensor,
     *,
     num_nodes: int,
 ) -> torch.Tensor:
-    """Sample a train-known node ID different from the positive destination."""
+    """Legacy random baseline sampler using only train-known node IDs."""
     if num_nodes < 3:
         raise ValueError(
             "endpoint negatives require at least two train-known nodes"
@@ -87,8 +190,6 @@ def sample_negative_destination(
     )
     collision = neg == pos_dst
     if collision.any():
-        # When there is more than one known node, increment modulo the known
-        # ID range until the collision is removed.
         shifted = ((neg[collision] - 1 + 1) % (num_nodes - 1)) + 1
         neg = neg.clone()
         neg[collision] = shifted
