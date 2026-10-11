@@ -121,7 +121,7 @@ def main() -> None:
         ]
         run(
             command,
-            cwd=parser_dir / "dialogparser",
+            cwd=parser_dir,
             dry_run=args.dry_run,
         )
         manifest["captures"].append(
