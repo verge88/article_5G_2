@@ -283,6 +283,7 @@ def main() -> None:
 
         for client in clients:
             load_shared_parameters(client.runner.model, global_parameters)
+            client.runner.reset_optimizer()
             losses: list[float] = []
             endpoint_coverages: list[float] = []
             procedure_coverages: list[float] = []
