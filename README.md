@@ -223,13 +223,15 @@ numeric_tgn
 semantic_tgn
 temporal_heat
 temporal_heat_aux
+temporal_heat_continuation_immediate
 temporal_heat_continuation
 ```
 
-where the last three isolate heterogeneous aggregation, auxiliary continuation
-training, and continuation surprise in the final anomaly score. Individual
-seed JSON files are retained and `summary.json` reports mean/std overall and
-per attack family.
+where the TemporalHEAT stages isolate heterogeneous aggregation, auxiliary
+continuation training, one-step continuation scoring, and multi-step sequence
+continuation scoring. Individual seed JSON files are retained and
+`summary.json` reports mean/std overall, per attack family, by explicit
+context scope, and the paired continuation gain.
 
 ### Context coverage is a dataset validity check
 
@@ -551,4 +553,20 @@ python scripts/run_cross_protocol_suite.py \
 The launcher executes the causal PCAP exporter first, then the leakage-safe
 preparation stage, verifies that the resulting train/test data are actually
 eligible for a cross-protocol claim, and only then starts the model ablation.
+
+
+
+### Immediate vs multi-step continuation
+
+Prepared data retains the last four explicitly correlated context events by
+default. The continuation head supports two controlled modes:
+
+```text
+immediate  = only the immediately preceding explicit-context event
+sequence   = GRU over the last K explicit-context events (default K=4)
+```
+
+The ablation runner evaluates both modes with identical train/test splits and
+seeds. The prepared `manifest.json` records `context_history_size` so the
+sequence receptive field is part of the experiment provenance.
 
