@@ -153,15 +153,15 @@ def main() -> None:
             manifest = json.load(handle)
         eligible = bool(
             manifest.get("claim_eligibility", {}).get(
-                "cross_protocol_continuation",
+                "sbi_cross_protocol_continuation",
                 False,
             )
         )
         if not eligible and not args.allow_zero_cross_protocol:
             coverage = manifest.get("context_coverage", {})
             raise SystemExit(
-                "prepared dataset has insufficient explicit cross-protocol "
-                "coverage for the continuation claim; use "
+                "prepared dataset has insufficient SBI-involving explicit "
+                "cross-protocol coverage for the primary continuation claim; use "
                 "--allow-zero-cross-protocol only for non-claim debugging. "
                 f"coverage={coverage}"
             )
