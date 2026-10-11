@@ -246,14 +246,21 @@ class TemporalHEATRunner:
 
             src = batch.src
             pos_dst = batch.dst
-            neg_dst, endpoint_mask = self.endpoint_negatives.sample(batch)
+            (
+                neg_dst,
+                neg_dst_role_id,
+                endpoint_mask,
+            ) = self.endpoint_negatives.sample(batch)
             nodes = torch.cat([src, pos_dst, neg_dst]).unique()
             z, assoc = self._embedding_context(nodes)
             z_src = z[assoc[src]]
             z_pos_dst = z[assoc[pos_dst]]
 
             benign_event = self._masked_benign_embedding(batch)
-            endpoint_event = self.model.encode_batch(batch)
+            endpoint_event = self.model.encode_batch(
+                batch,
+                dst_role_id=neg_dst_role_id,
+            )
             procedure_ids, procedure_mask = self.procedure_negatives.sample(
                 batch
             )
