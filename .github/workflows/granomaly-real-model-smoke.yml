@@ -1,0 +1,100 @@
+name: granomaly-real-model-smoke
+
+on:
+  push:
+    branches: ["feat/fedsiggraph-v1"]
+    paths:
+      - ".github/workflows/granomaly-real-model-smoke.yml"
+  workflow_dispatch:
+
+jobs:
+  real-model-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install project and PyG
+        run: pip install -e ".[dev]" torch-geometric scikit-learn
+      - name: Fetch pinned Granomaly
+        run: python scripts/fetch_granomaly.py --output data/raw/granomaly
+      - name: Prepare full SMF data
+        run: |
+          python scripts/prepare_granomaly.py \
+            --normal data/raw/granomaly/bridge_normal.csv \
+            --attack data/raw/granomaly/bridge_attack_smf.csv \
+            --output data/prepared/smf-full
+      - name: Build explicit non-research debug subset
+        run: |
+          python scripts/make_prepared_debug_subset.py \
+            --input data/prepared/smf-full \
+            --output data/prepared/smf-debug \
+            --train-events 3000 \
+            --val-events 500 \
+            --calibration-events 500 \
+            --test-events 1000
+      - name: Train semantic TGN on real-format subset
+        run: |
+          python scripts/train_semantic_tgn.py \
+            --data data/prepared/smf-debug \
+            --epochs 1 \
+            --batch-size 256 \
+            --neighbors 8 \
+            --event-dim 16 \
+            --target-fpr 0.1 \
+            --test-memory safe \
+            --allow-debug-subset \
+            --output results/semantic-tgn.json
+      - name: Train TemporalHEAT on real-format subset
+        run: |
+          python scripts/train_temporal_heat.py \
+            --data data/prepared/smf-debug \
+            --epochs 1 \
+            --batch-size 256 \
+            --neighbors 8 \
+            --event-dim 16 \
+            --memory-dim 16 \
+            --time-dim 8 \
+            --embedding-dim 16 \
+            --heads 4 \
+            --continuation-loss-weight 0 \
+            --continuation-score-weight 0 \
+            --target-fpr 0.1 \
+            --test-memory safe \
+            --allow-debug-subset \
+            --output results/temporal-heat.json
+      - name: Validate smoke result labeling
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          for filename in ("semantic-tgn.json", "temporal-heat.json"):
+              result = json.loads((Path("results") / filename).read_text())
+              assert result["research_metrics_valid"] is False
+              assert "metrics" in result
+              assert "endpoint_negative_coverage_final" in result
+              print(filename, {
+                  "model": result["model"],
+                  "endpoint_negative_coverage": (
+                      result["endpoint_negative_coverage_final"]
+                  ),
+                  "procedure_negative_coverage": (
+                      result["procedure_negative_coverage_final"]
+                  ),
+              })
+          PY
+      - name: Upload real-model smoke results
+        uses: actions/upload-artifact@v4
+        with:
+          name: granomaly-real-model-smoke
+          path: |
+            data/prepared/smf-debug/manifest.json
+            results/semantic-tgn.json
+            results/temporal-heat.json
