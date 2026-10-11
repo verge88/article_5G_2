@@ -22,6 +22,15 @@ from .schema import CanonicalEvent
 
 
 _REQUIRED_COLUMNS = {"time", "src", "dst", "message", "ue"}
+_SESSION_COLUMNS = (
+    "pdu_session_id",
+    "pduid",
+    "sm_context",
+    "smcontext",
+    "seid_c",
+    "seid_u",
+    "seid",
+)
 _HTTP_METHOD = re.compile(
     r"^(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s*:\s*(.+)$",
     re.IGNORECASE,
@@ -250,6 +259,30 @@ class SignalingParserAdapter:
                 row["ue"],
             )
 
+            # Enriched exports may expose one or more identifiers that bind
+            # NGAP/NAS, SBI and PFCP messages to the same PDU/SM session.
+            # Prefer a PDU/SM identifier over SEID, but never store the raw
+            # value: session_context is deployment-local and pseudonymized.
+            session_raw = None
+            session_kind = None
+            for column in _SESSION_COLUMNS:
+                if column in row.index and pd.notna(row[column]):
+                    value = str(row[column]).strip()
+                    if value and value.lower() not in {"none", "nan"}:
+                        session_raw = value
+                        session_kind = column
+                        break
+
+            session_context = (
+                _local_pseudonym(
+                    self.deployment_id,
+                    f"session:{session_kind}",
+                    session_raw,
+                )
+                if session_raw is not None
+                else None
+            )
+
             events.append(
                 CanonicalEvent(
                     event_id=int(source_order),
@@ -267,7 +300,7 @@ class SignalingParserAdapter:
                     message_type=message_type,
                     direction=direction,
                     ue_context=ue_context,
-                    session_context=None,
+                    session_context=session_context,
                     label=label,
                     attack_type=(attack_type if label == 1 else None),
                 )
