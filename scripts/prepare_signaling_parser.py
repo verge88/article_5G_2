@@ -160,10 +160,16 @@ def rate(mask) -> float:
     return float(mask.float().mean().item())
 
 
-def coverage(data) -> dict[str, float]:
+def coverage(data, *, sbi_protocol_id: int) -> dict[str, float]:
+    cross = data.cross_protocol_mask
+    sbi_cross = cross & (
+        (data.protocol_id == sbi_protocol_id)
+        | (data.prev_protocol_id == sbi_protocol_id)
+    )
     return {
         "explicit_context_history": rate(data.context_history_mask),
-        "cross_protocol_transition": rate(data.cross_protocol_mask),
+        "cross_protocol_transition": rate(cross),
+        "sbi_cross_protocol_transition": rate(sbi_cross),
     }
 
 
@@ -327,11 +333,15 @@ def main() -> None:
                 }
             )
 
+    sbi_protocol_id = fitted.vocab.protocol.encode("SBI")
     context_coverage = {
-        "train": coverage(train_data),
-        "val": coverage(val_data),
-        "calibration": coverage(calibration_data),
-        "test": coverage(test_data),
+        "train": coverage(train_data, sbi_protocol_id=sbi_protocol_id),
+        "val": coverage(val_data, sbi_protocol_id=sbi_protocol_id),
+        "calibration": coverage(
+            calibration_data,
+            sbi_protocol_id=sbi_protocol_id,
+        ),
+        "test": coverage(test_data, sbi_protocol_id=sbi_protocol_id),
     }
     manifest = {
         "source_adapter": "5G-Signaling-Parser",
