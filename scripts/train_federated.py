@@ -17,6 +17,7 @@ import numpy as np
 import torch
 
 from fedsiggraph.anomaly.calibration import CompositeScoreCalibrator
+from fedsiggraph.evaluation.provenance import runtime_provenance
 from fedsiggraph.federated import (
     coordinate_median,
     extract_shared_parameters,
@@ -432,6 +433,7 @@ def main() -> None:
         ),
         "clients": [client.name for client in clients],
         "shared_parameter_file": str(weights_path),
+        "provenance": runtime_provenance(Path(__file__).resolve().parents[1]),
         "history": history,
         "evaluations": evaluations,
     }
