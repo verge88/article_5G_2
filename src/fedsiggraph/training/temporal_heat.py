@@ -20,8 +20,8 @@ from fedsiggraph.models.continuation import continuation_nll
 from fedsiggraph.models.temporal_heat import TemporalHEAT
 from fedsiggraph.training.history import ObservedHeteroHistoryBank
 from fedsiggraph.training.negatives import (
+    EndpointNegativeTable,
     ProcedureNegativeTable,
-    sample_negative_destination,
 )
 
 
@@ -142,6 +142,7 @@ class TemporalHEATRunner:
             total_capacity, event_dim
         )
         self.procedure_negatives = ProcedureNegativeTable(train_data, seed)
+        self.endpoint_negatives = EndpointNegativeTable(train_data, seed + 1)
 
     def reset_state(self) -> None:
         self.model.reset_state()
@@ -212,7 +213,7 @@ class TemporalHEATRunner:
         *,
         prox_reference: dict[str, torch.Tensor] | None = None,
         prox_mu: float = 0.0,
-    ) -> tuple[float, float, float, float]:
+    ) -> tuple[float, float, float, float, float]:
         """Train one local epoch, optionally with a FedProx shared-weight term."""
         if prox_mu < 0:
             raise ValueError("prox_mu must be non-negative")
@@ -225,6 +226,7 @@ class TemporalHEATRunner:
 
         total_loss = 0.0
         total_events = 0
+        endpoint_negative_events = 0
         procedure_negative_events = 0
         context_events = 0
         cross_protocol_events = 0
@@ -235,9 +237,7 @@ class TemporalHEATRunner:
 
             src = batch.src
             pos_dst = batch.dst
-            neg_dst = sample_negative_destination(
-                pos_dst, num_nodes=self.num_nodes
-            )
+            neg_dst, endpoint_mask = self.endpoint_negatives.sample(batch)
             nodes = torch.cat([src, pos_dst, neg_dst]).unique()
             z, assoc = self._embedding_context(nodes)
             z_src = z[assoc[src]]
@@ -256,18 +256,25 @@ class TemporalHEATRunner:
             benign_logits = self.model.score_embeddings(
                 z_src, z_pos_dst, benign_event
             )
-            endpoint_logits = self.model.score_embeddings(
-                z_src, z[assoc[neg_dst]], endpoint_event
-            )
-
             primary_losses = [
                 self.criterion(
                     benign_logits, torch.zeros_like(benign_logits)
                 ),
-                self.criterion(
-                    endpoint_logits, torch.ones_like(endpoint_logits)
-                ),
             ]
+
+            if endpoint_mask.any():
+                endpoint_logits = self.model.score_embeddings(
+                    z_src[endpoint_mask],
+                    z[assoc[neg_dst[endpoint_mask]]],
+                    endpoint_event[endpoint_mask],
+                )
+                primary_losses.append(
+                    self.criterion(
+                        endpoint_logits,
+                        torch.ones_like(endpoint_logits),
+                    )
+                )
+                endpoint_negative_events += int(endpoint_mask.sum())
 
             if procedure_mask.any():
                 procedure_logits = self.model.score_embeddings(
@@ -344,6 +351,7 @@ class TemporalHEATRunner:
         denominator = max(total_events, 1)
         return (
             total_loss / denominator,
+            endpoint_negative_events / denominator,
             procedure_negative_events / denominator,
             context_events / denominator,
             cross_protocol_events / denominator,
