@@ -98,37 +98,55 @@ def _connection_key(row: pd.Series, src: str, dst: str) -> tuple[str, str]:
     return tuple(sorted((src_endpoint, dst_endpoint)))
 
 
+_StreamContext = tuple[str, str, str | None, str | None]
+
+
 def _resolve_sbi_stream(
     semantics: ParsedSemantics,
     *,
-    stream_state: dict[tuple[tuple[str, str], str], tuple[str, str]],
+    stream_state: dict[tuple[tuple[str, str], str], _StreamContext],
     connection: tuple[str, str],
 ) -> ParsedSemantics:
-    """Attach response/DATA frames to the normalized request on the same stream."""
+    """Attach response/DATA frames to the request on the same HTTP/2 stream.
+
+    Besides the normalized service/procedure, propagate only UE/session
+    identifiers explicitly observed in the request URI. No cross-stream or
+    time-window inference is performed.
+    """
     if semantics.protocol != "SBI" or semantics.stream_id is None:
         return semantics
 
     key = (connection, semantics.stream_id)
     if semantics.message_type == "HTTP2_REQUEST":
-        stream_state[key] = (semantics.relation, semantics.procedure)
+        stream_state[key] = (
+            semantics.relation,
+            semantics.procedure,
+            semantics.ue_context,
+            semantics.session_context,
+        )
         return semantics
 
     request = stream_state.get(key)
     if request is None:
         return semantics
 
-    relation, request_procedure = request
+    relation, request_procedure, ue_context, session_context = request
+    common = {
+        "relation": relation,
+        "ue_context": ue_context,
+        "session_context": session_context,
+    }
     if semantics.message_type == "HTTP2_RESPONSE":
         return replace(
             semantics,
-            relation=relation,
             procedure=f"RESPONSE {request_procedure}",
+            **common,
         )
     if semantics.message_type in {"HTTP2_DATA", "HTTP2_HEADERS"}:
         return replace(
             semantics,
-            relation=relation,
             procedure=f"{semantics.message_type} {request_procedure}",
+            **common,
         )
     return semantics
 
@@ -164,7 +182,7 @@ class GranomalyAdapter:
         ).reset_index(drop=True)
 
         stream_state: dict[
-            tuple[tuple[str, str], str], tuple[str, str]
+            tuple[tuple[str, str], str], _StreamContext
         ] = {}
         events: list[CanonicalEvent] = []
 
@@ -213,6 +231,8 @@ class GranomalyAdapter:
                     direction=semantics.direction,
                     result_code=semantics.result_code,
                     cause=semantics.cause,
+                    ue_context=semantics.ue_context,
+                    session_context=semantics.session_context,
                     packet_length=packet_length,
                     label=binary_label,
                     attack_type=None if binary_label == 0 else label_name,
