@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 
 try:
@@ -62,6 +64,74 @@ def evaluate_scores(
             float(fp / duration_hours) if duration_hours > 0 else None
         ),
     }
+
+
+def attack_type_breakdown(
+    attack_types: Sequence[str | None],
+    y_true: np.ndarray,
+    y_score: np.ndarray,
+    threshold: float,
+) -> dict[str, dict[str, float | int]]:
+    """Report detection recall for each attack family at one global threshold.
+
+    The sidecar labels are evaluation-only and must be aligned one-to-one with
+    the score stream. Benign rows are summarized as ``normal`` with their
+    false-positive rate.
+    """
+    labels = np.asarray(
+        ["normal" if value in (None, "", "normal") else str(value)
+         for value in attack_types],
+        dtype=object,
+    )
+    y_true = np.asarray(y_true, dtype=np.int64)
+    y_score = np.asarray(y_score, dtype=np.float64)
+
+    if not (labels.size == y_true.size == y_score.size):
+        raise ValueError(
+            "attack_types, y_true, and y_score must have identical length"
+        )
+
+    pred = (y_score > threshold).astype(np.int64)
+    result: dict[str, dict[str, float | int]] = {}
+
+    for attack_type in sorted(set(labels.tolist())):
+        mask = labels == attack_type
+        scores = y_score[mask]
+        predictions = pred[mask]
+        truths = y_true[mask]
+
+        item: dict[str, float | int] = {
+            "count": int(mask.sum()),
+            "mean_score": float(scores.mean()) if scores.size else 0.0,
+            "p95_score": (
+                float(np.quantile(scores, 0.95)) if scores.size else 0.0
+            ),
+        }
+
+        if attack_type == "normal":
+            normal_mask = truths == 0
+            fp = int((predictions[normal_mask] == 1).sum())
+            count = int(normal_mask.sum())
+            item.update(
+                {
+                    "false_positives": fp,
+                    "false_positive_rate": float(fp / max(count, 1)),
+                }
+            )
+        else:
+            malicious_mask = truths == 1
+            detected = int((predictions[malicious_mask] == 1).sum())
+            count = int(malicious_mask.sum())
+            item.update(
+                {
+                    "detected": detected,
+                    "recall": float(detected / max(count, 1)),
+                }
+            )
+
+        result[str(attack_type)] = item
+
+    return result
 
 
 def temporal_duration_ns(data) -> int | None:
