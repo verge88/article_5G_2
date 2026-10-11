@@ -206,3 +206,27 @@ def test_inferred_role_map_never_overrides_explicit_role_metadata():
     assert inferred["custom-ran"] == "gNB"
     assert resolved[0].src_role == "RAN_VENDOR_ROLE"
     assert resolved[0].dst_role == "AMF"
+
+
+def test_pfcp_role_inference_ignores_heartbeat_and_reverses_session_report():
+    df = pd.DataFrame(
+        {
+            "time": ["1.0", "1.1", "1.2"],
+            "src": ["a", "b", "upf"],
+            "dst": ["b", "a", "smf"],
+            "message": [
+                "HeartbeatRequest",
+                "HeartbeatRequest",
+                "SessionReportRequest",
+            ],
+            "ue": ["", "", ""],
+        }
+    )
+    events = SignalingParserAdapter("site-a").from_dataframe(df, label=0)
+
+    mapping = infer_role_map(events)
+
+    assert "a" not in mapping
+    assert "b" not in mapping
+    assert mapping["upf"] == "UPF"
+    assert mapping["smf"] == "SMF"
