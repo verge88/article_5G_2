@@ -286,9 +286,21 @@ python scripts/train_federated.py \
 The coordinator validates the shared semantic-schema fingerprint before
 training. Only trainable shared model parameters are aggregated. TGN memory,
 buffers, identity mappings, local calibration state, and parameters under the
-`local_adapter.*` namespace remain private. The framework-independent
-coordinator is intentionally the reference implementation; a Flower adapter can
-wrap the same parameter-partition and aggregation functions later.
+`local_adapter.*` namespace remain private.
+
+Federated TemporalHEAT enables a small residual personalization adapter by
+default (`--local-adapter-dim 16`). Its upper projection is zero-initialized,
+so the adapter starts as an identity mapping and learns deployment-specific
+corrections locally. The adapter persists across rounds while the local Adam
+optimizer state is reset at every round boundary. Set
+`--local-adapter-dim 0` for a non-personalized FedAvg/FedProx ablation.
+
+After the final round, each client performs its own benign calibration and test
+evaluation. Thresholds are therefore never averaged across deployments.
+
+The framework-independent coordinator is intentionally the reference
+implementation; a Flower adapter can wrap the same parameter-partition and
+aggregation functions later.
 
 
 ## Evaluation-only attack metadata
