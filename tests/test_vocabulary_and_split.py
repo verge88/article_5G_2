@@ -58,3 +58,28 @@ def test_split_keeps_attack_capture_out_of_development_sets():
     assert max(e.timestamp_ns for e in splits.train) <= min(
         e.timestamp_ns for e in splits.val
     )
+
+
+def test_split_does_not_cut_equal_timestamp_group():
+    benign = [
+        event(1, 100, "P1"),
+        event(2, 200, "P2"),
+        event(3, 200, "P3"),
+        event(4, 300, "P4"),
+        event(5, 400, "P5"),
+        event(6, 500, "P6"),
+    ]
+    test = [event(20, 1_000, "Attack", label=1)]
+
+    splits = split_benign_development(
+        benign,
+        test,
+        train_fraction=0.34,
+        val_fraction=0.33,
+    )
+
+    train_ids = {e.event_id for e in splits.train}
+    val_ids = {e.event_id for e in splits.val}
+
+    assert ({2, 3} <= train_ids) or ({2, 3} <= val_ids)
+    assert not ({2} <= train_ids and {3} <= val_ids)
