@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Iterable, Sequence
 
+from .context import build_context_transition_features
 from .features import CausalNumericFeatureEncoder
 from .index import LocalNodeIndex
 from .schema import CanonicalEvent
@@ -27,6 +28,10 @@ def to_temporal_data(
     node 0. Timestamps are shifted by a common train-time origin and expressed
     in microseconds by default, preserving real intervals without passing large
     Unix epoch values into the TGN time encoder.
+
+    Additional ``prev_*`` tensors describe only the immediately preceding
+    event in the same explicitly recovered UE/session context. Missing context
+    is represented with PAD IDs and ``context_history_mask=False``.
     """
     try:
         import torch
@@ -40,7 +45,17 @@ def to_temporal_data(
         raise ValueError("time_unit_ns must be positive")
 
     ordered = sorted(events, key=lambda e: (e.timestamp_ns, e.event_id))
-    numeric = numeric_encoder.transform(ordered, history=history)
+    history_ordered = sorted(
+        history, key=lambda e: (e.timestamp_ns, e.event_id)
+    )
+    numeric = numeric_encoder.transform(
+        ordered, history=history_ordered
+    )
+    transitions = build_context_transition_features(
+        ordered,
+        vocab=vocab,
+        history=history_ordered,
+    )
 
     src: list[int] = []
     dst: list[int] = []
@@ -79,6 +94,21 @@ def to_temporal_data(
         t=torch.as_tensor(t, dtype=torch.long),
         msg=torch.as_tensor(numeric, dtype=torch.float32),
         y=torch.as_tensor(y, dtype=torch.long),
+        prev_protocol_id=torch.as_tensor(
+            transitions.prev_protocol_id, dtype=torch.long
+        ),
+        prev_relation_id=torch.as_tensor(
+            transitions.prev_relation_id, dtype=torch.long
+        ),
+        prev_procedure_id=torch.as_tensor(
+            transitions.prev_procedure_id, dtype=torch.long
+        ),
+        context_history_mask=torch.as_tensor(
+            transitions.history_mask, dtype=torch.bool
+        ),
+        cross_protocol_mask=torch.as_tensor(
+            transitions.cross_protocol_mask, dtype=torch.bool
+        ),
         **kwargs,
     )
     data.num_nodes = node_index.num_nodes
