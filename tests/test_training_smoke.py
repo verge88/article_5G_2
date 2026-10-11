@@ -197,6 +197,14 @@ def test_temporal_heat_end_to_end(tmp_path: Path):
     assert payload["metrics"]["tp"] + payload["metrics"]["fn"] == 5
     assert payload["per_attack"]["portscan"]["count"] == 5
     assert 0.0 <= payload["context_coverage_test"] <= 1.0
+    assert (
+        payload["score_ablation"]["memory_trajectory"]
+        == "independent_causal_replay"
+    )
+    assert "base" in payload["score_ablation"]
+    assert "composite" in payload["score_ablation"]
+    assert payload["scope_metrics"]["cross_protocol"]["eligible"] is False
+    assert payload["scope_metrics"]["cross_protocol"]["count"] == 0
 
     with open(
         prepared / "manifest.json", "r", encoding="utf-8"
