@@ -70,12 +70,24 @@ class CanonicalEvent:
                 raise ValueError(f"{field_name} must be non-empty")
 
     @property
-    def context_key(self) -> tuple[str, str]:
-        """Return the best available *local* context key for causal history."""
+    def explicit_context_key(self) -> tuple[str, str] | None:
+        """Return a context only when it was explicitly recovered from traffic.
+
+        Cross-protocol objectives use this property so that missing correlation
+        identifiers are masked instead of being guessed from time or topology.
+        """
         if self.session_context:
             return ("session", self.session_context)
         if self.ue_context:
             return ("ue", self.ue_context)
+        return None
+
+    @property
+    def context_key(self) -> tuple[str, str]:
+        """Return the best local key for generic causal history features."""
+        explicit = self.explicit_context_key
+        if explicit is not None:
+            return explicit
         return ("nf_pair", f"{self.src_entity}->{self.dst_entity}")
 
     def semantic_key(self) -> tuple[str, str, str, str, str]:
