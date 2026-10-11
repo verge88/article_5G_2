@@ -2,6 +2,13 @@ name: origami-data-sanity
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - "scripts/export_correlated_pcap.py"
+      - "scripts/fetch_cross_protocol_sources.py"
+      - "scripts/inspect_signaling_source.py"
+      - "src/fedsiggraph/data/causal_correlation.py"
+      - ".github/workflows/origami-data-sanity.yml"
 
 jobs:
   parse-origami:
