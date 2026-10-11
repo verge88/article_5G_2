@@ -111,7 +111,8 @@ def to_temporal_data(
         ),
         **kwargs,
     )
-    data.num_nodes = node_index.num_nodes
-    data.time_origin_ns = int(time_origin_ns)
-    data.time_unit_ns = int(time_unit_ns)
+    # Keep dataset-level scalar metadata (time origin/unit, vocabulary sizes,
+    # deployment information) in the preparation manifest, not on TemporalData.
+    # TemporalDataLoader slices every custom attribute along the event axis and
+    # therefore expects tensor-like values with a leading event dimension.
     return data
