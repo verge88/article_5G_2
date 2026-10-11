@@ -2,6 +2,7 @@
 
 from .features import CausalNumericFeatureEncoder
 from .granomaly import GranomalyAdapter
+from .signaling_parser import SignalingParserAdapter
 from .index import LocalNodeIndex
 from .pipeline import (
     FittedPreprocessing,
@@ -15,6 +16,7 @@ from .vocab import FrozenVocabulary, SemanticVocabularies
 __all__ = [
     "CanonicalEvent",
     "GranomalyAdapter",
+    "SignalingParserAdapter",
     "CausalNumericFeatureEncoder",
     "LocalNodeIndex",
     "FittedPreprocessing",
