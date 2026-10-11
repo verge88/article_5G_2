@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import json
 
 from .schema import CanonicalEvent
 from .vocab import PAD_TOKEN, UNK_TOKEN
@@ -186,3 +187,11 @@ class FederatedSemanticVocabularies:
                 "buckets": self.message_type.buckets,
             },
         }
+
+    def fingerprint(self) -> str:
+        payload = json.dumps(
+            self.config(),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
