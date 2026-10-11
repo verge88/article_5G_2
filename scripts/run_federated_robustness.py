@@ -19,6 +19,9 @@ import subprocess
 import sys
 
 
+from fedsiggraph.evaluation.provenance import runtime_provenance
+
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -269,6 +272,7 @@ def main() -> None:
         "poison_clients": args.poison_client,
         "poison_mode": args.poison_mode if args.poison_client else None,
         "poison_factor": args.poison_factor if args.poison_client else None,
+        "provenance": runtime_provenance(ROOT),
         "runs": runs,
         "groups": summary_groups,
     }
