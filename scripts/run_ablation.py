@@ -11,6 +11,7 @@ import sys
 
 from fedsiggraph.evaluation.aggregate import aggregate_results
 from fedsiggraph.evaluation.provenance import runtime_provenance
+from fedsiggraph.evaluation.paired import paired_gain_summary
 
 
 MODEL_CHOICES = (
@@ -207,6 +208,64 @@ def main() -> None:
         with open(path, "r", encoding="utf-8") as handle:
             results.append(json.load(handle))
 
+    paired_continuation_gain: dict[str, dict] = {}
+    for model in ("temporal_heat_aux", "temporal_heat_continuation"):
+        matched = [
+            result
+            for result in results
+            if result.get("model") == model
+            and isinstance(result.get("score_ablation"), dict)
+        ]
+
+        overall_pr_auc = []
+        cross_protocol_pr_auc = []
+        cross_protocol_recall = []
+
+        for result in matched:
+            ablation = result["score_ablation"]
+            base = ablation.get("base", {})
+            composite = ablation.get("composite", {})
+
+            base_metrics = base.get("metrics") or {}
+            composite_metrics = composite.get("metrics") or {}
+            if (
+                base_metrics.get("pr_auc") is not None
+                and composite_metrics.get("pr_auc") is not None
+            ):
+                overall_pr_auc.append(
+                    composite_metrics["pr_auc"] - base_metrics["pr_auc"]
+                )
+
+            base_cross = (base.get("cross_protocol") or {}).get("metrics")
+            composite_cross = (
+                composite.get("cross_protocol") or {}
+            ).get("metrics")
+            if base_cross and composite_cross:
+                if (
+                    base_cross.get("pr_auc") is not None
+                    and composite_cross.get("pr_auc") is not None
+                ):
+                    cross_protocol_pr_auc.append(
+                        composite_cross["pr_auc"] - base_cross["pr_auc"]
+                    )
+                if (
+                    base_cross.get("recall") is not None
+                    and composite_cross.get("recall") is not None
+                ):
+                    cross_protocol_recall.append(
+                        composite_cross["recall"] - base_cross["recall"]
+                    )
+
+        paired_continuation_gain[model] = {
+            "overall_pr_auc": paired_gain_summary(overall_pr_auc),
+            "cross_protocol_pr_auc": paired_gain_summary(
+                cross_protocol_pr_auc
+            ),
+            "cross_protocol_recall": paired_gain_summary(
+                cross_protocol_recall
+            ),
+        }
+
     summary = {
         "data": str(data_dir),
         "models": args.models,
@@ -220,6 +279,7 @@ def main() -> None:
         "resume": args.resume,
         "provenance": runtime_provenance(Path(__file__).resolve().parents[1]),
         "aggregate": aggregate_results(results),
+        "paired_continuation_gain": paired_continuation_gain,
     }
     with open(
         output_dir / "summary.json", "w", encoding="utf-8"
