@@ -527,3 +527,28 @@ The underlying `CausalCorrelationTracker` returns immutable per-event
 snapshots. Later alias discovery may improve future correlation, but cannot
 retroactively modify an already emitted event.
 
+
+
+### One-command cross-protocol experiment from PCAP
+
+When `pyshark` and `tshark` are available, the entire correlated experiment
+can be launched directly from benign and attack captures:
+
+```bash
+pip install -e ".[ml,pcap,dev]"
+
+python scripts/run_cross_protocol_suite.py \
+  --benign-pcap /path/to/benign.pcap \
+  --test-pcap /path/to/attack.pcap \
+  --deployment-id site-a \
+  --test-label 1 \
+  --attack-type pfcp_session_deletion \
+  --workspace experiments/cross-protocol/site-a \
+  --seeds 1 2 3 \
+  --epochs 20
+```
+
+The launcher executes the causal PCAP exporter first, then the leakage-safe
+preparation stage, verifies that the resulting train/test data are actually
+eligible for a cross-protocol claim, and only then starts the model ablation.
+
