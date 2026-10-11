@@ -276,8 +276,16 @@ def apply_role_map(
     """Return immutable events with entity roles resolved from static metadata."""
     result = []
     for event in events:
-        src_role = role_by_entity.get(event.src_entity, event.src_role)
-        dst_role = role_by_entity.get(event.dst_entity, event.dst_role)
+        src_role = (
+            role_by_entity.get(event.src_entity, event.src_role)
+            if event.src_role == "UNKNOWN_NF"
+            else event.src_role
+        )
+        dst_role = (
+            role_by_entity.get(event.dst_entity, event.dst_role)
+            if event.dst_role == "UNKNOWN_NF"
+            else event.dst_role
+        )
         result.append(
             event.synthetic(
                 src_role=src_role,
