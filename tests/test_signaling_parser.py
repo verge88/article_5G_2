@@ -70,3 +70,30 @@ def test_shared_session_produces_cross_protocol_transition_features():
 
     assert transitions.history_mask.tolist() == [False, True, True]
     assert transitions.cross_protocol_mask.tolist() == [False, True, True]
+
+
+def test_cross_protocol_context_falls_back_to_explicit_ue_when_session_is_partial():
+    df = pd.DataFrame(
+        {
+            "time": ["1.0", "1.1", "1.2"],
+            "src": ["gnb1", "amf", "smf"],
+            "dst": ["amf", "smf", "upf"],
+            "message": [
+                "InitialUeMessage, NASType.RegistrationRequest",
+                "POST: /nsmf-pdusession/v1/sm-contexts",
+                "SessionEstablishmentRequest",
+            ],
+            "ue": ["imsi-001", "imsi-001", "imsi-001"],
+            "pdu_session_id": [None, None, "7"],
+        }
+    )
+    events = SignalingParserAdapter("site-a").from_dataframe(df, label=0)
+    vocab = SemanticVocabularies.fit(events)
+
+    transitions = build_context_transition_features(events, vocab=vocab)
+
+    assert events[0].session_context is None
+    assert events[1].session_context is None
+    assert events[2].session_context is not None
+    assert transitions.history_mask.tolist() == [False, True, True]
+    assert transitions.cross_protocol_mask.tolist() == [False, True, True]
