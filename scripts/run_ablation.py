@@ -55,6 +55,11 @@ def parse_args() -> argparse.Namespace:
         help="Permit explicitly non-research debug subsets.",
     )
     parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Reuse valid existing model/seed result JSON files.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print commands without executing them.",
@@ -145,6 +150,21 @@ def model_command(
     raise ValueError(f"unknown model: {model}")
 
 
+def reusable_result(path: Path, *, model: str, seed: int) -> bool:
+    if not path.exists():
+        return False
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return False
+    return (
+        payload.get("model") == model
+        and int(payload.get("seed", -1)) == int(seed)
+        and isinstance(payload.get("metrics"), dict)
+    )
+
+
 def main() -> None:
     args = parse_args()
     data_dir = Path(args.data)
@@ -163,9 +183,17 @@ def main() -> None:
                 seed=seed,
                 args=args,
             )
-            print("$", " ".join(command), flush=True)
             result_paths.append(output)
 
+            if args.resume and reusable_result(
+                output,
+                model=model,
+                seed=seed,
+            ):
+                print(f"[resume] reuse {output}", flush=True)
+                continue
+
+            print("$", " ".join(command), flush=True)
             if args.dry_run:
                 continue
 
@@ -189,6 +217,7 @@ def main() -> None:
         "learning_rate": args.lr,
         "target_fpr": args.target_fpr,
         "test_memory": args.test_memory,
+        "resume": args.resume,
         "provenance": runtime_provenance(Path(__file__).resolve().parents[1]),
         "aggregate": aggregate_results(results),
     }
