@@ -233,6 +233,11 @@ def main() -> None:
 
     with open(data_dir / "manifest.json", "r", encoding="utf-8") as handle:
         manifest = json.load(handle)
+    if manifest.get("debug_subset") and not args.allow_debug_subset:
+        raise RuntimeError(
+            "debug_subset requires --allow-debug-subset; "
+            "its metrics are not valid research results"
+        )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     capacity = int(
@@ -281,6 +286,7 @@ def main() -> None:
     )
 
     result = {
+        "research_metrics_valid": not bool(manifest.get("debug_subset")),
         "model": "causal_numeric_tgn",
         "device": str(device),
         "epochs": args.epochs,
