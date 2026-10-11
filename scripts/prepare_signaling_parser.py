@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 from pathlib import Path
 
@@ -51,6 +52,34 @@ def load_role_map(path: str | None) -> dict[str, str]:
     if not isinstance(value, dict):
         raise ValueError("role-map must contain a JSON object")
     return {str(key): str(item) for key, item in value.items()}
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def source_inventory(
+    *,
+    csv_path: str | None,
+    directory: str | None,
+    pattern: str,
+) -> list[dict[str, object]]:
+    if csv_path:
+        paths = [Path(csv_path)]
+    else:
+        paths = sorted(Path(directory).glob(pattern))
+    return [
+        {
+            "name": path.name,
+            "bytes": path.stat().st_size,
+            "sha256": sha256(path),
+        }
+        for path in paths
+    ]
 
 
 def load_events(
@@ -229,6 +258,18 @@ def main() -> None:
     }
     manifest = {
         "source_adapter": "5G-Signaling-Parser",
+        "source_files": {
+            "benign": source_inventory(
+                csv_path=args.benign_csv,
+                directory=args.benign_dir,
+                pattern=args.benign_pattern,
+            ),
+            "test": source_inventory(
+                csv_path=args.test_csv,
+                directory=args.test_dir,
+                pattern=args.test_pattern,
+            ),
+        },
         "deployment_id": args.deployment_id,
         "counts": {
             "train": len(splits.train),
