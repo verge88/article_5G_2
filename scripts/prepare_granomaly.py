@@ -194,6 +194,15 @@ def main() -> None:
     ]
 
     preprocessing = {
+        "vocab_sizes": {
+            "src_role": len(fitted.vocab.src_role),
+            "dst_role": len(fitted.vocab.dst_role),
+            "protocol": len(fitted.vocab.protocol),
+            "relation": len(fitted.vocab.relation),
+            "procedure": len(fitted.vocab.procedure),
+            "message_type": len(fitted.vocab.message_type),
+            "direction": len(fitted.vocab.direction),
+        },
         "vocab": {
             "src_role": fitted.vocab.src_role.token_to_id,
             "dst_role": fitted.vocab.dst_role.token_to_id,
