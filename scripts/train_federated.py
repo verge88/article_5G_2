@@ -23,6 +23,7 @@ from fedsiggraph.federated import (
     load_shared_parameters,
     trimmed_mean,
     weighted_average,
+    poison_update,
 )
 from fedsiggraph.training.metadata import load_test_metadata
 from fedsiggraph.training.metrics import (
@@ -73,6 +74,18 @@ def parse_args() -> argparse.Namespace:
         default="weighted_mean",
     )
     parser.add_argument("--trim-ratio", type=float, default=0.2)
+    parser.add_argument(
+        "--poison-client",
+        action="append",
+        default=[],
+        help="Client directory name whose model update is perturbed.",
+    )
+    parser.add_argument(
+        "--poison-mode",
+        choices=["model_replacement", "sign_flip"],
+        default="sign_flip",
+    )
+    parser.add_argument("--poison-factor", type=float, default=5.0)
     parser.add_argument("--neighbors", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--event-dim", type=int, default=64)
@@ -332,6 +345,14 @@ def main() -> None:
                 cross_coverages.append(cross_coverage)
 
             shared = extract_shared_parameters(client.runner.model)
+            poisoned = client.name in set(args.poison_client)
+            if poisoned:
+                shared = poison_update(
+                    shared,
+                    global_parameters,
+                    mode=args.poison_mode,
+                    factor=args.poison_factor,
+                )
             examples = int(client.train.num_events)
             client_updates.append((shared, examples))
             client_metrics.append(
@@ -343,6 +364,7 @@ def main() -> None:
                     "procedure_negative_coverage": float(procedure_coverages[-1]),
                     "context_coverage": float(context_coverages[-1]),
                     "cross_protocol_coverage": float(cross_coverages[-1]),
+                    "poisoned_update": poisoned,
                 }
             )
 
@@ -391,6 +413,13 @@ def main() -> None:
         "device": str(device),
         "local_adapter_dim": args.local_adapter_dim,
         "target_fpr": args.target_fpr,
+        "poison_clients": sorted(set(args.poison_client)),
+        "poison_mode": (
+            args.poison_mode if args.poison_client else None
+        ),
+        "poison_factor": (
+            args.poison_factor if args.poison_client else None
+        ),
         "clients": [client.name for client in clients],
         "shared_parameter_file": str(weights_path),
         "history": history,
