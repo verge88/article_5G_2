@@ -57,6 +57,11 @@ def parse_args() -> argparse.Namespace:
         default=2.0,
     )
     parser.add_argument(
+        "--continuation-history-mode",
+        choices=["immediate", "sequence"],
+        default="sequence",
+    )
+    parser.add_argument(
         "--test-memory",
         choices=["frozen", "safe", "blind"],
         default="safe",
@@ -127,6 +132,7 @@ def main() -> None:
         token_mask_prob=args.token_mask_prob,
         continuation_loss_weight=args.continuation_loss_weight,
         cross_protocol_weight=args.cross_protocol_weight,
+        continuation_history_mode=args.continuation_history_mode,
         device=device,
     )
 
@@ -309,6 +315,7 @@ def main() -> None:
         "continuation_loss_weight": args.continuation_loss_weight,
         "continuation_score_weight": args.continuation_score_weight,
         "cross_protocol_weight": args.cross_protocol_weight,
+        "continuation_history_mode": args.continuation_history_mode,
         "seed": args.seed,
         "target_fpr": args.target_fpr,
         "threshold": threshold,
