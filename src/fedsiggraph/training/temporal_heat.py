@@ -128,7 +128,8 @@ class TemporalHEATRunner:
             embedding_dim=embedding_dim,
             heads=heads,
         ).to(device)
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
+        self.lr = float(lr)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
         self.criterion = torch.nn.BCEWithLogitsLoss()
         self.neighbor_loader = LastNeighborLoader(
             self.num_nodes,
@@ -143,6 +144,12 @@ class TemporalHEATRunner:
         )
         self.procedure_negatives = ProcedureNegativeTable(train_data, seed)
         self.endpoint_negatives = EndpointNegativeTable(train_data, seed + 1)
+
+    def reset_optimizer(self) -> None:
+        """Reset local optimizer state at a federated round boundary."""
+        self.optimizer = torch.optim.Adam(
+            self.model.parameters(), lr=self.lr
+        )
 
     def reset_state(self) -> None:
         self.model.reset_state()
