@@ -119,6 +119,30 @@ All learned preprocessing state is fitted on **benign train only**. Unseen proce
 
 If the attack capture is from a different timestamp epoch than the benign capture, `manifest.json` marks `test_history_mode=reset` so TGN memory is not artificially connected across unrelated captures.
 
+
+## Reproducible Granomaly NRF/SMF suite
+
+The first real-data experiment table can be produced with one command:
+
+```bash
+python scripts/run_granomaly_suite.py \
+  --workspace experiments/granomaly \
+  --experiments nrf smf \
+  --seeds 1 2 3 \
+  --epochs 20 \
+  --test-memory safe
+```
+
+The suite downloads the three Granomaly CSV files from the pinned upstream
+revision, records SHA-256 hashes in `source_manifest.json`, prepares NRF and
+SMF experiments with the same leakage-safe pipeline, runs the full staged
+ablation, and writes `suite_summary.json`.
+
+Use `--dry-run` to inspect the exact experiment commands without training.
+Use `--skip-download` only when the pinned captures are already present under
+`<workspace>/raw`.
+
+
 ## Baseline TGN
 
 Run:
