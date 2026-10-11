@@ -31,6 +31,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--attack-type")
     parser.add_argument("--train-fraction", type=float, default=0.70)
     parser.add_argument("--val-fraction", type=float, default=0.15)
+    parser.add_argument(
+        "--test-history-mode",
+        choices=["auto", "reset", "continuous"],
+        default="auto",
+        help=(
+            "Whether test events inherit development temporal/context history. "
+            "Use reset for independent captures or cross-dataset evaluation."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -117,10 +126,22 @@ def main() -> None:
 
     # Separate captures may use unrelated clock epochs. Only warm test context
     # from development state when timestamps are chronologically contiguous.
-    test_is_contiguous = bool(splits.test and development_history) and (
+    auto_contiguous = bool(splits.test and development_history) and (
         min(event.timestamp_ns for event in splits.test)
         >= max(event.timestamp_ns for event in development_history)
     )
+    if args.test_history_mode == "auto":
+        test_is_contiguous = auto_contiguous
+    elif args.test_history_mode == "continuous":
+        if not auto_contiguous:
+            raise ValueError(
+                "continuous test history requested but test timestamps precede "
+                "the development history"
+            )
+        test_is_contiguous = True
+    else:
+        test_is_contiguous = False
+
     test_history = development_history if test_is_contiguous else ()
     test_origin_ns = (
         fitted.time_origin_ns
@@ -216,6 +237,7 @@ def main() -> None:
             "test": len(splits.test),
         },
         "test_history_mode": "continuous" if test_is_contiguous else "reset",
+        "test_history_mode_requested": args.test_history_mode,
         "context_coverage": context_coverage,
         "claim_eligibility": research_claim_eligibility(context_coverage),
         "explicit_context_counts": {
