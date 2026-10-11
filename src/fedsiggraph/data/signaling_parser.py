@@ -85,10 +85,25 @@ def _normalize_role(entity: str, explicit: Mapping[str, str]) -> str:
     if entity in explicit:
         return str(explicit[entity])
 
-    compact = re.sub(r"[^a-z0-9]", "", entity.lower())
+    lower = entity.lower()
+    compact = re.sub(r"[^a-z0-9]", "", lower)
+    tokens = [
+        token
+        for token in re.split(r"[^a-z0-9]+", lower)
+        if token
+    ]
+
     for alias, role in _ROLE_ALIASES.items():
         if compact == alias or compact.startswith(alias):
             return role
+
+        # Open5GS daemons commonly appear as hostnames such as
+        # open5gs-amfd/open5gs-smfd. Match only whole hostname tokens (plus
+        # the conventional daemon suffix "d") to avoid accidental substring
+        # matches inside unrelated hostnames.
+        if alias in tokens or f"{alias}d" in tokens:
+            return role
+
     return "UNKNOWN_NF"
 
 
