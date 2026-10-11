@@ -32,6 +32,21 @@ def _summary(values: list[float]) -> dict[str, float | int]:
     }
 
 
+
+def _metric_summaries(items: Iterable[dict]) -> dict[str, dict]:
+    materialized = list(items)
+    metrics: dict[str, dict] = {}
+    for key in _METRIC_KEYS:
+        values = [
+            item.get(key)
+            for item in materialized
+            if item.get(key) is not None
+        ]
+        if values:
+            metrics[key] = _summary(values)
+    return metrics
+
+
 def aggregate_results(
     results: Iterable[dict],
 ) -> dict[str, dict]:
@@ -42,15 +57,9 @@ def aggregate_results(
 
     output: dict[str, dict] = {}
     for model, runs in sorted(grouped.items()):
-        metrics: dict[str, dict] = {}
-        for key in _METRIC_KEYS:
-            values = [
-                run.get("metrics", {}).get(key)
-                for run in runs
-                if run.get("metrics", {}).get(key) is not None
-            ]
-            if values:
-                metrics[key] = _summary(values)
+        metrics = _metric_summaries(
+            run.get("metrics", {}) for run in runs
+        )
 
         attack_values: dict[str, dict[str, list[float]]] = defaultdict(
             lambda: defaultdict(list)
@@ -70,10 +79,63 @@ def aggregate_results(
             for attack_type, items in sorted(attack_values.items())
         }
 
+        scope_names = sorted(
+            {
+                scope
+                for run in runs
+                for scope in run.get("scope_metrics", {})
+            }
+        )
+        scope_metrics: dict[str, dict] = {}
+        for scope in scope_names:
+            entries = [
+                run.get("scope_metrics", {}).get(scope, {})
+                for run in runs
+            ]
+            eligible = [entry for entry in entries if entry.get("eligible")]
+            metric_dicts = [
+                entry.get("metrics", {})
+                for entry in eligible
+                if entry.get("metrics") is not None
+            ]
+            scope_metrics[scope] = {
+                "eligible_runs": len(eligible),
+                "counts": _summary(
+                    [float(entry.get("count", 0)) for entry in eligible]
+                ) if eligible else _summary([]),
+                "metrics": _metric_summaries(metric_dicts),
+            }
+
+        ablation_names = sorted(
+            {
+                name
+                for run in runs
+                for name in run.get("score_ablation", {})
+            }
+        )
+        score_ablation: dict[str, dict] = {}
+        for name in ablation_names:
+            entries = [
+                run.get("score_ablation", {}).get(name, {})
+                for run in runs
+            ]
+            score_ablation[name] = {
+                "metrics": _metric_summaries(
+                    entry.get("metrics", {}) for entry in entries
+                ),
+                "cross_protocol": _metric_summaries(
+                    entry.get("cross_protocol", {}).get("metrics", {})
+                    for entry in entries
+                    if entry.get("cross_protocol", {}).get("eligible")
+                ),
+            }
+
         output[model] = {
             "runs": len(runs),
             "seeds": [run.get("seed") for run in runs],
             "metrics": metrics,
+            "scope_metrics": scope_metrics,
+            "score_ablation": score_ablation,
             "per_attack": per_attack,
         }
 
