@@ -80,30 +80,25 @@ class EndpointNegativeTable:
     def __init__(self, train_data, seed: int) -> None:
         self.rng = random.Random(seed)
 
-        # Learn a stable semantic role for every train-known node from both
-        # source and destination appearances.
-        node_roles: dict[int, set[int]] = {}
-        for node, role in zip(
-            train_data.src.tolist(), train_data.src_role_id.tolist()
-        ):
-            if node != 0:
-                node_roles.setdefault(int(node), set()).add(int(role))
+        # Endpoint negatives replace *destination* nodes, so role IDs must come
+        # exclusively from the destination-role vocabulary. src_role_id and
+        # dst_role_id are intentionally separate vocabularies and their integer
+        # IDs are not comparable even when they encode the same textual role.
+        destination_roles: dict[int, set[int]] = {}
         for node, role in zip(
             train_data.dst.tolist(), train_data.dst_role_id.tolist()
         ):
             if node != 0:
-                node_roles.setdefault(int(node), set()).add(int(role))
+                destination_roles.setdefault(int(node), set()).add(int(role))
 
-        self.nodes_by_role: dict[int, tuple[int, ...]] = {}
         role_nodes: dict[int, set[int]] = {}
-        for node, roles in node_roles.items():
-            # A canonical NF identity should map to one role. Ambiguous entities
-            # are excluded from hard-negative sampling rather than guessed.
+        for node, roles in destination_roles.items():
+            # Exclude only genuinely ambiguous destination-role assignments.
             if len(roles) != 1:
                 continue
             role = next(iter(roles))
             role_nodes.setdefault(role, set()).add(node)
-        self.nodes_by_role = {
+        self.nodes_by_role: dict[int, tuple[int, ...]] = {
             role: tuple(sorted(nodes)) for role, nodes in role_nodes.items()
         }
 
