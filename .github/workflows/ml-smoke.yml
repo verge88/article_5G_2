@@ -19,5 +19,13 @@ jobs:
         run: pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Install project and PyG
         run: pip install -e ".[dev]" torch-geometric scikit-learn
-      - name: Run PyG and training smoke tests
-        run: pytest tests/test_pyg_smoke.py tests/test_training_smoke.py -q
+      - name: Run PyG, hard-negative, and federated parameter smoke tests
+        run: >-
+          pytest
+          tests/test_pyg_smoke.py
+          tests/test_training_smoke.py
+          tests/test_endpoint_negative_table.py
+          tests/test_federated_parameters.py
+          -q
+      - name: Check federated trainer CLI
+        run: python scripts/train_federated.py --help
