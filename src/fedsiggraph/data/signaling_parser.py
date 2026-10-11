@@ -251,10 +251,33 @@ def infer_role_map(
 
         elif event.protocol == "PFCP":
             lower = event.procedure.lower()
-            if "request" in lower:
+
+            # N4 session lifecycle requests originate at the SMF. Do not use
+            # Heartbeat/Association requests here: either peer may initiate
+            # them. SessionReport is the opposite direction (UPF -> SMF).
+            smf_to_upf = any(
+                name in lower
+                for name in (
+                    "sessionestablishmentrequest",
+                    "sessionmodificationrequest",
+                    "sessiondeletionrequest",
+                )
+            )
+            upf_to_smf = "sessionreportrequest" in lower
+            smf_response = "sessionreportresponse" in lower
+            upf_response = any(
+                name in lower
+                for name in (
+                    "sessionestablishmentresponse",
+                    "sessionmodificationresponse",
+                    "sessiondeletionresponse",
+                )
+            )
+
+            if smf_to_upf or smf_response:
                 vote(event.src_entity, "SMF")
                 vote(event.dst_entity, "UPF")
-            elif "response" in lower:
+            elif upf_to_smf or upf_response:
                 vote(event.src_entity, "UPF")
                 vote(event.dst_entity, "SMF")
 
