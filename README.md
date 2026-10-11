@@ -303,6 +303,34 @@ implementation; a Flower adapter can wrap the same parameter-partition and
 aggregation functions later.
 
 
+
+## Federated robustness matrix
+
+Controlled FL robustness experiments can be launched without changing the
+training/evaluation code:
+
+```bash
+python scripts/run_federated_robustness.py \
+  --clients data/site-a data/site-b data/site-c \
+  --poison-client site-c \
+  --poison-mode sign_flip \
+  --poison-factor 5 \
+  --rounds 10 \
+  --seeds 1 2 3 \
+  --output-dir results/federated-robustness
+```
+
+The matrix always includes clean FedAvg and clean FedProx. When a poison client
+is provided it additionally compares poisoned FedProx with weighted mean,
+coordinate-wise median, and trimmed mean aggregation. Poisoning operates only on
+the selected client's outgoing model update relative to the current global
+parameters; it does not modify packet traces or ground-truth labels.
+
+This mode is intended only for controlled resilience experiments. The generated
+`summary.json` reports mean client PR-AUC, recall, and false-positive rate for
+each strategy/aggregation condition while retaining every per-seed result file.
+
+
 ## Evaluation-only attack metadata
 
 Preparation also writes `test_metadata.csv`. It contains the original attack
