@@ -122,3 +122,25 @@ def test_origami_compact_sbi_messages_are_not_misclassified_as_ngap():
     assert events[1].relation == "SBI:nudm"
     assert events[1].procedure == "GET:nudm-ueau"
     assert events[2].direction == "RESPONSE"
+
+
+def test_open5gs_daemon_hostnames_resolve_to_transferable_nf_roles():
+    df = pd.DataFrame(
+        {
+            "time": ["1.0", "1.1"],
+            "src": ["open5gs-amfd", "open5gs-smfd"],
+            "dst": ["open5gs-smfd", "open5gs-upfd"],
+            "message": [
+                "POST-nsmf-pdusession",
+                "SessionEstablishmentRequest",
+            ],
+            "ue": ["imsi-001", "imsi-001"],
+        }
+    )
+
+    events = SignalingParserAdapter("site-a").from_dataframe(df, label=0)
+
+    assert events[0].src_role == "AMF"
+    assert events[0].dst_role == "SMF"
+    assert events[1].src_role == "SMF"
+    assert events[1].dst_role == "UPF"
