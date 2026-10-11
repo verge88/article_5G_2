@@ -57,6 +57,11 @@ def parse_args() -> argparse.Namespace:
         help="Reuse captures already present under workspace/raw.",
     )
     parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Reuse valid completed model/seed result JSON files.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print all commands without running them.",
@@ -139,6 +144,8 @@ def main() -> None:
             "--test-memory",
             args.test_memory,
         ]
+        if args.resume:
+            ablation_command.append("--resume")
         if args.dry_run:
             ablation_command.append("--dry-run")
         run(ablation_command, dry_run=False)
@@ -164,6 +171,7 @@ def main() -> None:
         "learning_rate": args.lr,
         "target_fpr": args.target_fpr,
         "test_memory": args.test_memory,
+        "resume": args.resume,
         "provenance": runtime_provenance(ROOT),
         "results": experiment_summaries,
     }
