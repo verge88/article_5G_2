@@ -486,3 +486,44 @@ started manually from GitHub Actions. It supports `quick`, `standard`, and
 test-memory policies. The workflow uploads the complete experiment workspace,
 including every seed-level JSON and `suite_summary.json`, as an artifact.
 
+
+
+## Causal PCAP correlation export
+
+For raw PCAP input, do **not** reconstruct context from the final UE repository
+state after the entire capture has been parsed. That can backfill identifiers
+learned from future packets into earlier events.
+
+FedSigGraph includes a streaming exporter that snapshots correlation state in
+capture order:
+
+```bash
+pip install -e ".[pcap]"
+# tshark must also be installed on the host
+
+python scripts/export_correlated_pcap.py \
+  --pcap /path/to/capture.pcap \
+  --output data/capture_correlated.csv
+```
+
+The exporter tracks only identifiers visible at the current packet, including
+RAN/AMF NGAP IDs, SUPI/SUCI, PDU Session ID, SM Context and PFCP SEID aliases.
+Its emitted `ue` and `session_context` values are local correlation keys, not
+subscriber identifiers.
+
+The full causal path is then:
+
+```text
+PCAP
+  ↓ export_correlated_pcap.py
+correlated CSV
+  ↓ prepare_signaling_parser.py
+train / val / calibration / test TemporalData
+  ↓ run_cross_protocol_suite.py
+paired base-vs-continuation ablation
+```
+
+The underlying `CausalCorrelationTracker` returns immutable per-event
+snapshots. Later alias discovery may improve future correlation, but cannot
+retroactively modify an already emitted event.
+
