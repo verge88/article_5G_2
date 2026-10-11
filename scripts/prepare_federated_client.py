@@ -13,6 +13,7 @@ from fedsiggraph.data import (
     fit_federated_preprocessing,
 )
 from fedsiggraph.data.pyg import to_temporal_data
+from fedsiggraph.evaluation.eligibility import research_claim_eligibility
 
 
 def parse_args() -> argparse.Namespace:
@@ -255,6 +256,14 @@ def main() -> None:
         json.dump(preprocessing, handle, indent=2, sort_keys=True)
 
     train_events = splits.train
+    context_coverage = {
+        "train": split_coverage(train_data),
+        "val": split_coverage(val_data),
+        "calibration": split_coverage(calibration_data),
+        "test": split_coverage(test_data),
+    }
+    claim_eligibility = research_claim_eligibility(context_coverage)
+
     manifest = {
         "federated": True,
         "client_id": args.client_id,
@@ -272,12 +281,8 @@ def main() -> None:
         "test_history_mode": (
             "continuous" if test_is_contiguous else "reset"
         ),
-        "context_coverage": {
-            "train": split_coverage(train_data),
-            "val": split_coverage(val_data),
-            "calibration": split_coverage(calibration_data),
-            "test": split_coverage(test_data),
-        },
+        "context_coverage": context_coverage,
+        "claim_eligibility": claim_eligibility,
         "hash_collision_audit_train": {
             "relation": hash_collision_stats(
                 train_events, vocab.relation, lambda event: event.relation
