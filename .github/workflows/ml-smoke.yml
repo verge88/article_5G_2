@@ -27,9 +27,11 @@ jobs:
           tests/test_endpoint_negative_table.py
           tests/test_federated_parameters.py
           tests/test_federated_poisoning.py
+          tests/test_signaling_prepare_smoke.py
           -q
       - name: Check federated experiment CLIs
         run: |
           python scripts/train_federated.py --help
           python scripts/run_federated_robustness.py --help
           python scripts/run_granomaly_suite.py --help
+          python scripts/prepare_signaling_parser.py --help
