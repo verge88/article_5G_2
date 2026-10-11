@@ -55,3 +55,26 @@ def test_current_event_can_merge_previously_separate_aliases_without_backfill():
     assert future.ue_key == ran.ue_key
     # Earlier immutable snapshots keep exactly what was known then.
     assert supi.ue_key != ran.ue_key
+
+
+def test_future_seid_link_does_not_backfill_earlier_sbi_or_pfcp_snapshot():
+    tracker = CausalCorrelationTracker()
+
+    sbi = tracker.observe(supi="imsi-001")
+    pfcp = tracker.observe(seid="2002")
+
+    assert sbi.ue_key is not None
+    assert sbi.session_key is None
+    assert pfcp.ue_key is None
+    assert pfcp.session_key is not None
+
+    linked = tracker.observe(
+        supi="imsi-001",
+        seid="2002",
+    )
+    assert linked.ue_key == sbi.ue_key
+    assert linked.session_key == pfcp.session_key
+
+    # The causal snapshots emitted before the linking packet remain unchanged.
+    assert sbi.session_key is None
+    assert pfcp.ue_key is None
