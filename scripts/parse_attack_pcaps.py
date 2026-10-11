@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -25,7 +27,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--pattern",
-        default="*.pcapng",
+        default="*.pcap*",
         help="Glob pattern below --pcap-dir.",
     )
     parser.add_argument(
@@ -92,6 +94,7 @@ def main() -> None:
     args = parse_args()
     pcap_dir = Path(args.pcap_dir)
     output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     parser_dir = Path(args.parser_dir)
 
     ensure_parser(
@@ -114,7 +117,27 @@ def main() -> None:
     }
 
     for pcap in pcaps:
-        capture_out = output_dir / pcap.stem
+        source_pcap = pcap
+        temporary_pcap: Path | None = None
+
+        if pcap.suffix == ".gz":
+            # Zenodo ORIGAMI distributes its small example capture as
+            # example.pcap.gz. PyShark expects a capture file, so materialize a
+            # temporary decompressed copy and remove it after parsing.
+            temporary_root = output_dir / ".decompressed"
+            temporary_root.mkdir(parents=True, exist_ok=True)
+            temporary_pcap = temporary_root / pcap.stem
+            if args.dry_run:
+                print(f"plan gunzip {pcap} -> {temporary_pcap}")
+            else:
+                with gzip.open(pcap, "rb") as src, open(
+                    temporary_pcap, "wb"
+                ) as dst:
+                    shutil.copyfileobj(src, dst)
+            source_pcap = temporary_pcap
+
+        capture_name = source_pcap.stem
+        capture_out = output_dir / capture_name
         bridge = Path(__file__).with_name(
             "signaling_parser_bridge.py"
         ).resolve()
@@ -124,21 +147,32 @@ def main() -> None:
             "--parser-dir",
             str(parser_dir.resolve()),
             "--pcap",
-            str(pcap.resolve()),
+            str(source_pcap.resolve()),
             "--output-dir",
             str(capture_out.resolve()),
         ]
         if args.hosts:
             command += ["--hosts", str(Path(args.hosts).resolve())]
-        run(
-            command,
-            cwd=None,
-            dry_run=args.dry_run,
-        )
+
+        try:
+            run(
+                command,
+                cwd=None,
+                dry_run=args.dry_run,
+            )
+        finally:
+            if (
+                temporary_pcap is not None
+                and temporary_pcap.exists()
+                and not args.dry_run
+            ):
+                temporary_pcap.unlink()
+
         manifest["captures"].append(
             {
                 "pcap": str(pcap),
                 "output": str(capture_out),
+                "compressed": pcap.suffix == ".gz",
             }
         )
 
