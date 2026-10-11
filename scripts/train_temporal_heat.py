@@ -68,6 +68,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output")
     parser.add_argument(
+        "--result-model-name",
+        help="Optional stable model label used by multi-run aggregation.",
+    )
+    parser.add_argument(
         "--allow-debug-subset",
         action="store_true",
         help="Permit explicitly non-research debug subsets.",
@@ -300,7 +304,10 @@ def main() -> None:
 
     result = {
         "research_metrics_valid": not bool(manifest.get("debug_subset")),
-        "model": "temporal_heat_context_continuation",
+        "model": (
+            args.result_model_name
+            or "temporal_heat_context_continuation"
+        ),
         "device": str(device),
         "epochs": args.epochs,
         "batch_size": args.batch_size,
