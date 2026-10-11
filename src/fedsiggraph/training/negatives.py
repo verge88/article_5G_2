@@ -127,26 +127,42 @@ class EndpointNegativeTable:
             ]
             self.candidate_roles[key] = tuple(sorted(candidates))
 
-    def sample(self, batch) -> tuple[torch.Tensor, torch.Tensor]:
+    def sample(
+        self, batch
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return negative destination, its destination-role ID, and validity."""
         src_roles = batch.src_role_id.detach().cpu().tolist()
         procedures = batch.procedure_id.detach().cpu().tolist()
         protocols = batch.protocol_id.detach().cpu().tolist()
         actual_dst = batch.dst.detach().cpu().tolist()
+        actual_dst_roles = batch.dst_role_id.detach().cpu().tolist()
 
         sampled: list[int] = []
+        sampled_roles: list[int] = []
         valid: list[bool] = []
-        for src_role, procedure, protocol, current_dst in zip(
-            src_roles, procedures, protocols, actual_dst
+        for (
+            src_role,
+            procedure,
+            protocol,
+            current_dst,
+            current_dst_role,
+        ) in zip(
+            src_roles,
+            procedures,
+            protocols,
+            actual_dst,
+            actual_dst_roles,
         ):
             roles = self.candidate_roles.get(
                 (int(src_role), int(procedure), int(protocol)), ()
             )
             if not roles:
                 sampled.append(int(current_dst))
+                sampled_roles.append(int(current_dst_role))
                 valid.append(False)
                 continue
 
-            role = self.rng.choice(roles)
+            role = int(self.rng.choice(roles))
             nodes = [
                 node
                 for node in self.nodes_by_role[role]
@@ -154,14 +170,21 @@ class EndpointNegativeTable:
             ]
             if not nodes:
                 sampled.append(int(current_dst))
+                sampled_roles.append(int(current_dst_role))
                 valid.append(False)
                 continue
 
-            sampled.append(self.rng.choice(nodes))
+            sampled.append(int(self.rng.choice(nodes)))
+            sampled_roles.append(role)
             valid.append(True)
 
         return (
             torch.as_tensor(sampled, dtype=torch.long, device=batch.dst.device),
+            torch.as_tensor(
+                sampled_roles,
+                dtype=torch.long,
+                device=batch.dst_role_id.device,
+            ),
             torch.as_tensor(valid, dtype=torch.bool, device=batch.dst.device),
         )
 
