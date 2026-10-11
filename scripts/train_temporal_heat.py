@@ -157,18 +157,33 @@ def main() -> None:
             f"cross_protocol_coverage={cross_coverage:.4f}"
         )
 
-    # Benign validation warms deployment-local temporal state. Calibration
-    # stays attack-free and is the sole source of score scaling/threshold.
-    runner.score_stream(val, observe="always")
-    calibration_components = runner.score_stream(
-        calibration,
-        observe="always",
-    )
+    # Rebuild evaluation memory once with the *final* frozen model weights.
+    # The last training epoch observed events while weights were still changing,
+    # so carrying that state directly into validation would make evaluation
+    # depend on optimizer trajectory rather than only on the final model.
+    def warm_to_pretest_state():
+        runner.reset_state()
+        runner.score_stream(train, observe="always")
+        runner.score_stream(val, observe="always")
+        return runner.score_stream(calibration, observe="always")
+
+    calibration_components = warm_to_pretest_state()
     if np.any(calibration_components.labels == 1):
         raise RuntimeError("calibration data contains attack labels")
 
-    base_threshold = calibrate_threshold(
+    base_calibrator = CompositeScoreCalibrator.fit(
         calibration_components.base,
+        calibration_components.continuation,
+        calibration_components.context_mask,
+        continuation_weight=0.0,
+    )
+    base_calibration_scores = base_calibrator.transform(
+        calibration_components.base,
+        calibration_components.continuation,
+        calibration_components.context_mask,
+    )
+    base_threshold = calibrate_threshold(
+        base_calibration_scores,
         args.target_fpr,
     )
 
@@ -187,14 +202,14 @@ def main() -> None:
         calibration_scores, args.target_fpr
     )
 
-    if manifest.get("test_history_mode") == "reset":
-        runner.reset_state()
-
     observe_policy = {
         "frozen": "never",
         "safe": "safe",
         "blind": "always",
     }[args.test_memory]
+
+    if manifest.get("test_history_mode") == "reset":
+        runner.reset_state()
     test_components = runner.score_stream(
         test,
         observe=observe_policy,
@@ -206,6 +221,28 @@ def main() -> None:
         test_components.continuation,
         test_components.context_mask,
     )
+
+    # Base-only scoring gets its own causal trajectory. This matters for the
+    # safe policy because accept/reject decisions change future TGN memory.
+    warm_to_pretest_state()
+    if manifest.get("test_history_mode") == "reset":
+        runner.reset_state()
+    base_test_components = runner.score_stream(
+        test,
+        observe=observe_policy,
+        calibrator=base_calibrator,
+        threshold=base_threshold if observe_policy == "safe" else None,
+    )
+    base_test_scores = base_calibrator.transform(
+        base_test_components.base,
+        base_test_components.continuation,
+        base_test_components.context_mask,
+    )
+    if not np.array_equal(
+        base_test_components.labels,
+        test_components.labels,
+    ):
+        raise RuntimeError("base/composite test streams are not label-aligned")
 
     metadata = load_test_metadata(
         data_dir / manifest.get(
@@ -219,8 +256,8 @@ def main() -> None:
         time_unit_ns=int(manifest.get("time_unit_ns", 1_000)),
     )
     base_metrics = evaluate_scores(
-        test_components.labels,
-        test_components.base,
+        base_test_components.labels,
+        base_test_scores,
         base_threshold,
         duration_ns=duration_ns,
     )
@@ -231,16 +268,16 @@ def main() -> None:
         duration_ns=duration_ns,
     )
     base_context_metrics = evaluate_masked_scores(
-        test_components.labels,
-        test_components.base,
+        base_test_components.labels,
+        base_test_scores,
         base_threshold,
-        test_components.context_mask,
+        base_test_components.context_mask,
     )
     base_cross_metrics = evaluate_masked_scores(
-        test_components.labels,
-        test_components.base,
+        base_test_components.labels,
+        base_test_scores,
         base_threshold,
-        test_components.cross_protocol_mask,
+        base_test_components.cross_protocol_mask,
     )
     composite_context_metrics = evaluate_masked_scores(
         test_components.labels,
@@ -276,6 +313,7 @@ def main() -> None:
         "target_fpr": args.target_fpr,
         "threshold": threshold,
         "base_threshold": base_threshold,
+        "base_score_calibration": calibrator_to_dict(base_calibrator),
         "score_calibration": calibrator_to_dict(score_calibrator),
         "test_memory": args.test_memory,
         "test_history_mode": manifest.get("test_history_mode"),
@@ -308,6 +346,11 @@ def main() -> None:
             "cross_protocol": composite_cross_metrics,
         },
         "score_ablation": {
+            "memory_trajectory": (
+                "independent_causal_replay"
+                if args.test_memory == "safe"
+                else "equivalent_policy_replay"
+            ),
             "base": {
                 "threshold": base_threshold,
                 "metrics": base_metrics,
