@@ -228,6 +228,9 @@ def main() -> None:
                 e.session_context is not None for e in test_events
             ),
         },
+        "context_history_size": int(
+            train_data.context_sequence_mask.size(1)
+        ),
         "time_unit": "microseconds",
         "time_unit_ns": 1_000,
     }
