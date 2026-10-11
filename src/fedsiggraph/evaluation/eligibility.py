@@ -20,6 +20,12 @@ def research_claim_eligibility(
 
     train_cross = float(train.get("cross_protocol_transition", 0.0))
     test_cross = float(test.get("cross_protocol_transition", 0.0))
+    train_sbi_cross = float(
+        train.get("sbi_cross_protocol_transition", 0.0)
+    )
+    test_sbi_cross = float(
+        test.get("sbi_cross_protocol_transition", 0.0)
+    )
     train_context = float(train.get("explicit_context_history", 0.0))
     test_context = float(test.get("explicit_context_history", 0.0))
 
@@ -33,5 +39,9 @@ def research_claim_eligibility(
         "cross_protocol_continuation": (
             train_cross >= minimum_cross_protocol_events_fraction
             and test_cross >= minimum_cross_protocol_events_fraction
+        ),
+        "sbi_cross_protocol_continuation": (
+            train_sbi_cross >= minimum_cross_protocol_events_fraction
+            and test_sbi_cross >= minimum_cross_protocol_events_fraction
         ),
     }
