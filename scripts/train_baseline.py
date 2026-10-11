@@ -39,6 +39,11 @@ def parse_args() -> argparse.Namespace:
         help="How test events are allowed to enter temporal memory.",
     )
     parser.add_argument("--output", help="Optional JSON result path.")
+    parser.add_argument(
+        "--allow-debug-subset",
+        action="store_true",
+        help="Permit explicitly non-research debug subsets.",
+    )
     return parser.parse_args()
 
 
