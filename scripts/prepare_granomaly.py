@@ -10,6 +10,7 @@ from pathlib import Path
 
 from fedsiggraph.data import GranomalyAdapter, fit_preprocessing
 from fedsiggraph.data.pyg import to_temporal_data
+from fedsiggraph.evaluation.eligibility import research_claim_eligibility
 
 
 def parse_args() -> argparse.Namespace:
@@ -227,6 +228,14 @@ def main() -> None:
     ) as handle:
         json.dump(preprocessing, handle, indent=2, sort_keys=True)
 
+    context_coverage = {
+        "train": split_coverage(train_data),
+        "val": split_coverage(val_data),
+        "calibration": split_coverage(calibration_data),
+        "test": split_coverage(test_data),
+    }
+    claim_eligibility = research_claim_eligibility(context_coverage)
+
     manifest = {
         "deployment_id": args.deployment_id,
         "counts": {
@@ -240,12 +249,8 @@ def main() -> None:
         "test_history_mode": (
             "continuous" if test_is_contiguous else "reset"
         ),
-        "context_coverage": {
-            "train": split_coverage(train_data),
-            "val": split_coverage(val_data),
-            "calibration": split_coverage(calibration_data),
-            "test": split_coverage(test_data),
-        },
+        "context_coverage": context_coverage,
+        "claim_eligibility": claim_eligibility,
         "test_unknown_rates": {
             "node_identity": node_unknown_rate(
                 splits.test, fitted.node_index
