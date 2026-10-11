@@ -52,6 +52,16 @@ class CausalCorrelationTracker:
         return key
 
     @staticmethod
+    def _oldest(keys: Iterable[str]) -> str | None:
+        materialized = list(keys)
+        if not materialized:
+            return None
+        return min(
+            materialized,
+            key=lambda key: int(key.rsplit("-", 1)[-1]),
+        )
+
+    @staticmethod
     def _items(kinds: Iterable[str], values: dict[str, object | None]):
         for kind in kinds:
             value = _clean(values.get(kind))
@@ -128,11 +138,12 @@ class CausalCorrelationTracker:
             if key in self._session_ue
         ]
 
+        known_ue = self._oldest(
+            [*existing_ues, *session_ue_candidates]
+        )
         ue_key = (
-            existing_ues[0]
-            if existing_ues
-            else session_ue_candidates[0]
-            if session_ue_candidates
+            known_ue
+            if known_ue is not None
             else self._new_ue()
             if ue_items
             else None
@@ -143,9 +154,10 @@ class CausalCorrelationTracker:
             for item in ue_items:
                 self._ue_alias[item] = ue_key
 
+        known_session = self._oldest(existing_sessions)
         session_key = (
-            existing_sessions[0]
-            if existing_sessions
+            known_session
+            if known_session is not None
             else self._new_session()
             if session_items
             else None
