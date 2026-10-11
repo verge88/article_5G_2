@@ -45,6 +45,11 @@ def parse_args() -> argparse.Namespace:
         default="safe",
     )
     parser.add_argument("--output")
+    parser.add_argument(
+        "--allow-debug-subset",
+        action="store_true",
+        help="Permit explicitly non-research debug subsets.",
+    )
     return parser.parse_args()
 
 
@@ -321,6 +326,11 @@ def main() -> None:
         preprocessing = json.load(handle)
     with open(data_dir / "manifest.json", "r", encoding="utf-8") as handle:
         manifest = json.load(handle)
+    if manifest.get("debug_subset") and not args.allow_debug_subset:
+        raise RuntimeError(
+            "debug_subset requires --allow-debug-subset; "
+            "its metrics are not valid research results"
+        )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     capacity = int(
@@ -387,6 +397,7 @@ def main() -> None:
     )
 
     result = {
+        "research_metrics_valid": not bool(manifest.get("debug_subset")),
         "model": "semantic_causal_tgn",
         "device": str(device),
         "epochs": args.epochs,
