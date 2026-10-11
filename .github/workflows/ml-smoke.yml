@@ -38,3 +38,5 @@ jobs:
           python scripts/run_granomaly_suite.py --help
           python scripts/prepare_signaling_parser.py --help
           python scripts/run_cross_protocol_suite.py --help
+          python scripts/fetch_cross_protocol_sources.py --help
+          python scripts/parse_attack_pcaps.py --help
