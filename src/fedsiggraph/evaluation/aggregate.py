@@ -110,7 +110,8 @@ def aggregate_results(
             {
                 name
                 for run in runs
-                for name in run.get("score_ablation", {})
+                for name, item in run.get("score_ablation", {}).items()
+                if isinstance(item, dict) and "metrics" in item
             }
         )
         score_ablation: dict[str, dict] = {}
