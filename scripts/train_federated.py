@@ -72,6 +72,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--time-dim", type=int, default=32)
     parser.add_argument("--embedding-dim", type=int, default=128)
     parser.add_argument("--heads", type=int, default=4)
+    parser.add_argument(
+        "--local-adapter-dim",
+        type=int,
+        default=16,
+        help="Private residual adapter bottleneck; 0 disables personalization.",
+    )
     parser.add_argument("--token-mask-prob", type=float, default=0.05)
     parser.add_argument("--continuation-loss-weight", type=float, default=0.25)
     parser.add_argument("--continuation-score-weight", type=float, default=1.0)
@@ -151,6 +157,7 @@ def build_clients(args: argparse.Namespace, device: torch.device) -> list[Client
             continuation_loss_weight=args.continuation_loss_weight,
             cross_protocol_weight=args.cross_protocol_weight,
             device=device,
+            local_adapter_dim=args.local_adapter_dim,
         )
         states.append(
             ClientState(
@@ -362,6 +369,7 @@ def main() -> None:
         "batch_size": args.batch_size,
         "seed": args.seed,
         "device": str(device),
+        "local_adapter_dim": args.local_adapter_dim,
         "target_fpr": args.target_fpr,
         "clients": [client.name for client in clients],
         "shared_parameter_file": str(weights_path),
