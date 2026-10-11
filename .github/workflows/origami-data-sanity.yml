@@ -1,0 +1,47 @@
+name: origami-data-sanity
+
+on:
+  workflow_dispatch:
+
+jobs:
+  parse-origami:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install tshark
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tshark
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" pyshark textual
+
+      - name: Download pinned ORIGAMI example PCAP
+        run: |
+          python scripts/fetch_cross_protocol_sources.py             --output data/raw/cross-protocol             --origami pcap
+
+      - name: Parse ORIGAMI with pinned signaling parser
+        run: |
+          python scripts/parse_attack_pcaps.py             --pcap-dir data/raw/cross-protocol/origami             --output-dir data/parsed/origami             --bootstrap
+
+      - name: Inspect real signaling coverage
+        run: |
+          python scripts/inspect_signaling_source.py             --directory data/parsed/origami             --output data/parsed/origami/inspection.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: origami-signaling-inspection
+          path: |
+            data/raw/cross-protocol/source_manifest.json
+            data/parsed/origami/parser_manifest.json
+            data/parsed/origami/inspection.json
