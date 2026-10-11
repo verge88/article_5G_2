@@ -16,6 +16,7 @@ from fedsiggraph.training.metadata import load_test_metadata
 from fedsiggraph.training.metrics import (
     attack_type_breakdown,
     calibrate_threshold,
+    evaluate_masked_scores,
     evaluate_scores,
     temporal_duration_ns,
 )
@@ -166,6 +167,11 @@ def main() -> None:
     if np.any(calibration_components.labels == 1):
         raise RuntimeError("calibration data contains attack labels")
 
+    base_threshold = calibrate_threshold(
+        calibration_components.base,
+        args.target_fpr,
+    )
+
     score_calibrator = CompositeScoreCalibrator.fit(
         calibration_components.base,
         calibration_components.continuation,
@@ -208,6 +214,47 @@ def main() -> None:
         expected_labels=test_components.labels,
     )
 
+    duration_ns = temporal_duration_ns(
+        test,
+        time_unit_ns=int(manifest.get("time_unit_ns", 1_000)),
+    )
+    base_metrics = evaluate_scores(
+        test_components.labels,
+        test_components.base,
+        base_threshold,
+        duration_ns=duration_ns,
+    )
+    composite_metrics = evaluate_scores(
+        test_components.labels,
+        test_scores,
+        threshold,
+        duration_ns=duration_ns,
+    )
+    base_context_metrics = evaluate_masked_scores(
+        test_components.labels,
+        test_components.base,
+        base_threshold,
+        test_components.context_mask,
+    )
+    base_cross_metrics = evaluate_masked_scores(
+        test_components.labels,
+        test_components.base,
+        base_threshold,
+        test_components.cross_protocol_mask,
+    )
+    composite_context_metrics = evaluate_masked_scores(
+        test_components.labels,
+        test_scores,
+        threshold,
+        test_components.context_mask,
+    )
+    composite_cross_metrics = evaluate_masked_scores(
+        test_components.labels,
+        test_scores,
+        threshold,
+        test_components.cross_protocol_mask,
+    )
+
     result = {
         "research_metrics_valid": not bool(manifest.get("debug_subset")),
         "model": "temporal_heat_context_continuation",
@@ -228,6 +275,7 @@ def main() -> None:
         "seed": args.seed,
         "target_fpr": args.target_fpr,
         "threshold": threshold,
+        "base_threshold": base_threshold,
         "score_calibration": calibrator_to_dict(score_calibrator),
         "test_memory": args.test_memory,
         "test_history_mode": manifest.get("test_history_mode"),
@@ -254,15 +302,25 @@ def main() -> None:
             if test_components.cross_protocol_mask.size
             else 0.0
         ),
-        "metrics": evaluate_scores(
-            test_components.labels,
-            test_scores,
-            threshold,
-            duration_ns=temporal_duration_ns(
-                test,
-                time_unit_ns=int(manifest.get("time_unit_ns", 1_000)),
-            ),
-        ),
+        "metrics": composite_metrics,
+        "scope_metrics": {
+            "explicit_context": composite_context_metrics,
+            "cross_protocol": composite_cross_metrics,
+        },
+        "score_ablation": {
+            "base": {
+                "threshold": base_threshold,
+                "metrics": base_metrics,
+                "explicit_context": base_context_metrics,
+                "cross_protocol": base_cross_metrics,
+            },
+            "composite": {
+                "threshold": threshold,
+                "metrics": composite_metrics,
+                "explicit_context": composite_context_metrics,
+                "cross_protocol": composite_cross_metrics,
+            },
+        },
         "per_attack": attack_type_breakdown(
             metadata.attack_types,
             test_components.labels,
