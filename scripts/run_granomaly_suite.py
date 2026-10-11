@@ -15,6 +15,15 @@ from fedsiggraph.evaluation.provenance import runtime_provenance
 
 ROOT = Path(__file__).resolve().parents[1]
 
+MODEL_CHOICES = (
+    "numeric_tgn",
+    "semantic_tgn",
+    "temporal_heat",
+    "temporal_heat_aux",
+    "temporal_heat_continuation_immediate",
+    "temporal_heat_continuation",
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -26,6 +35,12 @@ def parse_args() -> argparse.Namespace:
         default=["nrf", "smf"],
     )
     parser.add_argument("--seeds", nargs="+", type=int, default=[1, 2, 3])
+    parser.add_argument(
+        "--models",
+        nargs="+",
+        choices=MODEL_CHOICES,
+        default=list(MODEL_CHOICES),
+    )
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--neighbors", type=int, default=32)
@@ -107,6 +122,8 @@ def main() -> None:
             str(prepared),
             "--output-dir",
             str(results),
+            "--models",
+            *args.models,
             "--seeds",
             *[str(seed) for seed in args.seeds],
             "--epochs",
@@ -140,6 +157,7 @@ def main() -> None:
         "source": source_manifest,
         "experiments": args.experiments,
         "seeds": args.seeds,
+        "models": args.models,
         "epochs": args.epochs,
         "batch_size": args.batch_size,
         "neighbors": args.neighbors,
