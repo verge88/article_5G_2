@@ -1,3 +1,8 @@
+import pytest
+
+pytest.importorskip("torch")
+pytest.importorskip("torch_geometric")
+
 import pandas as pd
 
 from fedsiggraph.data import SignalingParserAdapter, fit_preprocessing
