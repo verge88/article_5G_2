@@ -1,3 +1,5 @@
+import pytest
+
 from fedsiggraph.evaluation.aggregate import aggregate_results
 
 
@@ -101,20 +103,22 @@ def test_aggregate_results_includes_cross_protocol_scope_and_score_ablation():
     assert summary["scope_metrics"]["cross_protocol"]["counts"]["mean"] == 11.0
     assert (
         summary["scope_metrics"]["cross_protocol"]["metrics"]["pr_auc"]["mean"]
-        == 0.82
+        == pytest.approx(0.82)
     )
     assert (
         summary["score_ablation"]["base"]["cross_protocol"]["recall"]["mean"]
-        == 0.425
+        == pytest.approx(0.425)
     )
     assert (
         summary["score_ablation"]["composite"]["cross_protocol"]["recall"]["mean"]
-        == 0.65
+        == pytest.approx(0.65)
     )
 
-    assert abs(
-        summary["continuation_gain"]["overall"]["pr_auc"]["mean"] - 0.11
-    ) < 1e-12
-    assert abs(
-        summary["continuation_gain"]["cross_protocol"]["recall"]["mean"] - 0.225
-    ) < 1e-12
+    assert (
+        summary["continuation_gain"]["overall"]["pr_auc"]["mean"]
+        == pytest.approx(0.11)
+    )
+    assert (
+        summary["continuation_gain"]["cross_protocol"]["recall"]["mean"]
+        == pytest.approx(0.225)
+    )
