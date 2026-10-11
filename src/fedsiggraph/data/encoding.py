@@ -8,7 +8,7 @@ from statistics import median
 from typing import Iterable
 
 from .schema import CanonicalEvent
-from .vocabulary import FrozenVocabulary
+from .vocab import FrozenVocabulary
 
 
 def _mad(values: list[float], center: float) -> float:
