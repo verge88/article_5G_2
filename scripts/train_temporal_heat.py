@@ -120,6 +120,7 @@ def main() -> None:
     )
 
     losses: list[float] = []
+    endpoint_coverages: list[float] = []
     procedure_coverages: list[float] = []
     context_coverages: list[float] = []
     cross_coverages: list[float] = []
@@ -127,16 +128,19 @@ def main() -> None:
     for epoch in range(1, args.epochs + 1):
         (
             loss,
+            endpoint_coverage,
             procedure_coverage,
             context_coverage,
             cross_coverage,
         ) = runner.train_epoch(train, args.batch_size)
         losses.append(loss)
+        endpoint_coverages.append(endpoint_coverage)
         procedure_coverages.append(procedure_coverage)
         context_coverages.append(context_coverage)
         cross_coverages.append(cross_coverage)
         print(
             f"epoch={epoch:03d} loss={loss:.6f} "
+            f"endpoint_negative_coverage={endpoint_coverage:.4f} "
             f"procedure_negative_coverage={procedure_coverage:.4f} "
             f"context_coverage={context_coverage:.4f} "
             f"cross_protocol_coverage={cross_coverage:.4f}"
@@ -217,6 +221,9 @@ def main() -> None:
         "test_memory": args.test_memory,
         "test_history_mode": manifest.get("test_history_mode"),
         "train_loss_final": losses[-1] if losses else None,
+        "endpoint_negative_coverage_final": (
+            endpoint_coverages[-1] if endpoint_coverages else None
+        ),
         "procedure_negative_coverage_final": (
             procedure_coverages[-1] if procedure_coverages else None
         ),
