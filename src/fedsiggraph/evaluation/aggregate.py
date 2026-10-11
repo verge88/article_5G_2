@@ -7,6 +7,8 @@ import math
 import statistics
 from typing import Iterable
 
+from .paired import paired_gain_summary
+
 
 _METRIC_KEYS = (
     "pr_auc",
@@ -166,7 +168,7 @@ def aggregate_results(
                     )
 
             continuation_gain[scope_name] = {
-                key: _summary(values)
+                key: paired_gain_summary(values)
                 for key, values in sorted(gains.items())
             }
 
