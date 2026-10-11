@@ -54,6 +54,23 @@ def node_unknown_rate(events, node_index) -> float:
     ) / len(identities)
 
 
+def tensor_rate(values) -> float:
+    if int(values.numel()) == 0:
+        return 0.0
+    return float(values.float().mean().item())
+
+
+def split_coverage(data) -> dict[str, float]:
+    return {
+        "explicit_context_history": tensor_rate(
+            data.context_history_mask
+        ),
+        "cross_protocol_transition": tensor_rate(
+            data.cross_protocol_mask
+        ),
+    }
+
+
 def main() -> None:
     args = parse_args()
     output_dir = Path(args.output)
@@ -177,6 +194,12 @@ def main() -> None:
         "test_history_mode": (
             "continuous" if test_is_contiguous else "reset"
         ),
+        "context_coverage": {
+            "train": split_coverage(train_data),
+            "val": split_coverage(val_data),
+            "calibration": split_coverage(calibration_data),
+            "test": split_coverage(test_data),
+        },
         "test_unknown_rates": {
             "node_identity": node_unknown_rate(
                 splits.test, fitted.node_index
