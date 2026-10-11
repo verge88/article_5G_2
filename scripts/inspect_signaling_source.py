@@ -9,7 +9,11 @@ import json
 from pathlib import Path
 
 from fedsiggraph.data.context import build_context_transition_features
-from fedsiggraph.data.signaling_parser import SignalingParserAdapter
+from fedsiggraph.data.signaling_parser import (
+    SignalingParserAdapter,
+    apply_role_map,
+    infer_role_map,
+)
 from fedsiggraph.data.vocab import SemanticVocabularies
 
 
@@ -20,6 +24,11 @@ def parse_args() -> argparse.Namespace:
     source.add_argument("--directory")
     parser.add_argument("--pattern", default="*_m_stats.csv")
     parser.add_argument("--deployment-id", default="inspection")
+    parser.add_argument(
+        "--infer-roles",
+        action="store_true",
+        help="Infer gNB/AMF/SMF/UPF roles from NGAP/PFCP direction semantics.",
+    )
     parser.add_argument("--output")
     return parser.parse_args()
 
@@ -42,6 +51,10 @@ def main() -> None:
     if not events:
         raise RuntimeError("no signaling events parsed from source")
 
+    inferred_roles = infer_role_map(events) if args.infer_roles else {}
+    if inferred_roles:
+        events = apply_role_map(events, inferred_roles)
+
     vocab = SemanticVocabularies.fit(events)
     transitions = build_context_transition_features(events, vocab=vocab)
 
@@ -51,6 +64,7 @@ def main() -> None:
 
     result = {
         "source_files": source_files,
+        "inferred_roles": inferred_roles,
         "event_count": event_count,
         "protocol_counts": dict(
             sorted(Counter(event.protocol for event in events).items())
