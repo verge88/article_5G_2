@@ -31,7 +31,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--local-epochs", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--prox-mu", type=float, default=0.01)
-    parser.add_argument("--trim-ratio", type=float, default=0.2)
+    parser.add_argument(
+        "--trim-ratio",
+        type=float,
+        default=0.34,
+        help="0.34 trims one client per tail in a 3-client experiment.",
+    )
     parser.add_argument(
         "--poison-client",
         action="append",
@@ -164,6 +169,20 @@ def main() -> None:
     args = parse_args()
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.poison_client and len(args.clients) < 3:
+        raise ValueError(
+            "poisoning robustness matrix requires at least three clients; "
+            "with two clients median/trimmed aggregation cannot isolate one "
+            "malicious participant"
+        )
+    if args.poison_client:
+        trim = int(len(args.clients) * args.trim_ratio)
+        if trim == 0:
+            raise ValueError(
+                "trim-ratio would remove zero clients; increase it for a "
+                "meaningful trimmed-mean robustness experiment"
+            )
 
     matrix = [
         # Clean references:
