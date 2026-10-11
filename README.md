@@ -570,3 +570,24 @@ The ablation runner evaluates both modes with identical train/test splits and
 seeds. The prepared `manifest.json` records `context_history_size` so the
 sequence receptive field is part of the experiment provenance.
 
+
+
+### Paired statistical evidence
+
+Because base and continuation-composite scores are evaluated on matched
+seed/split pairs, \`summary.json\` now reports paired continuation effects rather
+than treating them as independent runs. For every metric it includes:
+
+\`\`\`text
+mean / std / median / min / max
+positive_fraction
+exact_sign_flip_pvalue
+\`\`\`
+
+The exact two-sided sign-flip test uses no asymptotic approximation. With only
+3 or 5 seeds its attainable p-values are necessarily coarse, so the manual
+\`granomaly-experiments\` workflow also provides a \`publication\` profile using
+10 matched seeds. The effect size and consistency should still be reported
+alongside the p-value; statistical significance alone is not a detection
+metric.
+
