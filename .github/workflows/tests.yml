@@ -17,3 +17,4 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev]"
       - run: pytest
+      - run: python scripts/prepare_signaling_parser.py --help
